@@ -8,6 +8,7 @@ const b = await Promise.race([
 	puppeteer.connect({
 		browserURL: "http://localhost:9222",
 		defaultViewport: null,
+		protocolTimeout: 60000, // 60s timeout for CDP commands
 	}),
 	new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000)),
 ]).catch((e) => {
