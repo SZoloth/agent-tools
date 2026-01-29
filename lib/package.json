@@ -1,0 +1,9 @@
+{
+  "name": "agent-tools-lib",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Library modules for agent-tools scrapers",
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

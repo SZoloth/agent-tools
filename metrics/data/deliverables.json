@@ -1,0 +1,84 @@
+{
+  "deliverables": [
+    {
+      "id": 1769015189856,
+      "title": "Product Craft Gap Analysis Presentation",
+      "project": "DWA-Strategy",
+      "stakeholder": "Charles/Leadership",
+      "type": "presentation",
+      "typeName": "Presentation",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015189925,
+      "title": "2026 Initiatives Master Plan",
+      "project": "DWA-Strategy",
+      "stakeholder": "Charles",
+      "type": "strategy",
+      "typeName": "Strategy Document",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015189991,
+      "title": "Jeff Courier Sync - Meeting Prep & Notes",
+      "project": "DWA-Courier",
+      "stakeholder": "Jeff Lombardo",
+      "type": "research",
+      "typeName": "Research & Analysis",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015190059,
+      "title": "W50 Release Notes Template",
+      "project": "DWA-Process",
+      "stakeholder": "Team",
+      "type": "process",
+      "typeName": "Process/Framework",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015190125,
+      "title": "Product Operating Model Gap Analysis",
+      "project": "DWA-Strategy",
+      "stakeholder": "Leadership",
+      "type": "strategy",
+      "typeName": "Strategy Document",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015190197,
+      "title": "AI Initiatives Hub",
+      "project": "DWA-Strategy",
+      "stakeholder": "Charles",
+      "type": "strategy",
+      "typeName": "Strategy Document",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015190259,
+      "title": "Automation Roadmap",
+      "project": "DWA-Process",
+      "stakeholder": "Team",
+      "type": "strategy",
+      "typeName": "Strategy Document",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    },
+    {
+      "id": 1769015190320,
+      "title": "Previz Cart/Selection UX Research",
+      "project": "DWA-Lasso",
+      "stakeholder": "Charles/Scott",
+      "type": "research",
+      "typeName": "Research & Analysis",
+      "date": "2026-01-21",
+      "quarter": "Q1 2026"
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-01-26T18:54:36.764Z",
+  "things": {
+    "last_analyzed": "2026-01-21T17:10:45.924Z",
+    "period_weeks": 4,
+    "total_completed": 80,
+    "category_breakdown": {
+      "shipped": 1,
+      "needle_mover": 2,
+      "uncategorized": 50,
+      "admin": 10,
+      "health": 9,
+      "personal": 3,
+      "work": 2,
+      "priority_high": 7,
+      "job_search": 1
+    },
+    "outcome_ratio": 5,
+    "admin_ratio": 16
+  },
+  "outreach": {
+    "sent": [],
+    "responses": [],
+    "interviews": [],
+    "weekly_counts": []
+  },
+  "claude_usage": {
+    "last_analyzed": "2026-01-21T17:10:43.984Z",
+    "sessions_by_date": {
+      "2026-01-20": 10,
+      "2026-01-19": 15,
+      "2025-12-26": 1,
+      "2025-12-25": 6,
+      "2025-12-24": 5,
+      "2025-12-23": 4
+    },
+    "task_types": {
+      "coding": 42,
+      "planning": 42,
+      "writing": 35,
+      "automation": 32,
+      "data_analysis": 30,
+      "research": 29,
+      "debugging": 28,
+      "personal": 25,
+      "job_search": 12
+    },
+    "total_sessions": 42,
+    "avg_quality_score": 14.3,
+    "files_modified_count": 3
+  },
+  "work_deliverables": {
+    "dwa": [],
+    "other": []
+  },
+  "strava": {
+    "weekly_summary": [],
+    "activity_types": {}
+  },
+  "streaks": {
+    "outreach": {
+      "current": 0,
+      "best": 0
+    },
+    "shipped": {
+      "current": 0,
+      "best": 0
+    },
+    "training": {
+      "current": 0,
+      "best": 0
+    }
+  },
+  "impact": {
+    "total": 19,
+    "byType": {
+      "coaching": 5,
+      "decision": 5,
+      "quick": 1,
+      "quote": 4,
+      "artifact": 4
+    },
+    "lastAggregated": "2026-01-26T18:54:36.764Z",
+    "lastWeekCount": 15
+  }
+}

@@ -16,6 +16,8 @@ const { execSync } = require('child_process');
 const REGISTRY_PATH = path.join(process.env.HOME, '.beads', 'registry.json');
 const LOGS_DIR = path.join(process.env.HOME, 'ideas', 'logs');
 const STATE_FILE = path.join(process.env.HOME, '.beads', 'daemon-health-state.json');
+const NOTIFY_TITLE = 'Claude cleanup';
+const NOTIFY_APP = path.join(process.env.HOME, 'Applications', 'Snitch.app');
 
 // Ensure logs directory exists
 if (!fs.existsSync(LOGS_DIR)) {
@@ -29,6 +31,18 @@ function log(message) {
   const line = `[${timestamp}] ${message}`;
   console.log(line);
   fs.appendFileSync(LOG_FILE, line + '\n');
+}
+
+function notifyKill(message) {
+  log(message);
+  try {
+    if (fs.existsSync(NOTIFY_APP)) {
+      execSync(`/usr/bin/open -a ${JSON.stringify(NOTIFY_APP)} --args ${JSON.stringify(message)} ${JSON.stringify(NOTIFY_TITLE)}`);
+      return;
+    }
+    const script = `display notification "${message.replace(/"/g, '\\"')}" with title "${NOTIFY_TITLE}"`;
+    execSync(`/usr/bin/osascript -e ${JSON.stringify(script)}`);
+  } catch {}
 }
 
 function getWorkspaces() {
@@ -114,6 +128,7 @@ function restartDaemon(dbPath, workspaceName) {
   log(`Restarting daemon for ${workspaceName}...`);
   try {
     // Kill existing daemon
+    notifyKill(`Restarting bd daemon for ${workspaceName}: issuing kill`);
     execSync(`bd daemons kill --db "${dbPath}" 2>&1`, { encoding: 'utf-8' });
 
     // Small delay before restart
