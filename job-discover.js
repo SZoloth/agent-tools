@@ -20,8 +20,10 @@
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
-import { fetchMultipleBoards } from "./lib/greenhouse.js";
+import { fetchMultipleBoards as fetchGreenhouseBoards } from "./lib/greenhouse.js";
+import { fetchMultipleBoards as fetchLeverBoards } from "./lib/lever.js";
+import { fetchMultipleBoards as fetchAshbyBoards } from "./lib/ashby.js";
+import { parseJobAlertEmails } from "./lib/job-email-parser.js";
 import { mergeJobs } from "./lib/deduplicator.js";
 
 const CACHE_PATH = path.join(process.env.HOME, ".claude/state/job-listings-cache.json");
@@ -189,47 +191,85 @@ function showRegistry(registry, json) {
 async function fetchFromATS(registry, options) {
   const { atsCompanies, verbose } = options;
 
-  // Determine which companies to fetch
-  let companies = Object.entries(registry.companies)
-    .filter(([_, info]) => info.ats === "greenhouse")
-    .map(([key, info]) => ({
-      token: info.token,
-      displayName: info.displayName,
-      tier: info.tier,
-    }));
+  // Group companies by ATS type
+  const byATS = { greenhouse: [], lever: [], ashby: [] };
 
-  // Filter to specific companies if specified
-  if (atsCompanies.length > 0) {
-    companies = companies.filter(
-      (c) =>
-        atsCompanies.includes(c.token.toLowerCase()) ||
-        atsCompanies.includes(c.displayName.toLowerCase())
-    );
+  for (const [key, info] of Object.entries(registry.companies)) {
+    const atsType = info.ats || "greenhouse";
+    if (byATS[atsType]) {
+      const company = {
+        token: info.token,
+        displayName: info.displayName,
+        tier: info.tier,
+      };
+
+      // Filter to specific companies if specified
+      if (atsCompanies.length > 0) {
+        if (
+          atsCompanies.includes(info.token.toLowerCase()) ||
+          atsCompanies.includes(info.displayName.toLowerCase())
+        ) {
+          byATS[atsType].push(company);
+        }
+      } else {
+        byATS[atsType].push(company);
+      }
+    }
   }
 
   if (verbose) {
-    console.log(`Fetching from ${companies.length} Greenhouse boards...`);
+    const counts = Object.entries(byATS)
+      .filter(([_, list]) => list.length > 0)
+      .map(([ats, list]) => `${list.length} ${ats}`)
+      .join(", ");
+    console.log(`Fetching from ATS boards: ${counts}`);
   }
 
-  const result = await fetchMultipleBoards(companies, {
-    concurrency: 5,
-    filterProduct: true,
-  });
+  // Fetch from all ATS types in parallel
+  const fetchOptions = { concurrency: 5, filterProduct: true };
 
-  if (verbose && result.errors.length > 0) {
-    console.log(`\nErrors (${result.errors.length}):`);
-    for (const err of result.errors.slice(0, 5)) {
+  const [ghResult, leverResult, ashbyResult] = await Promise.all([
+    byATS.greenhouse.length > 0
+      ? fetchGreenhouseBoards(byATS.greenhouse, fetchOptions)
+      : { jobs: [], errors: [], stats: { total: 0, successful: 0, failed: 0, jobsFound: 0 } },
+    byATS.lever.length > 0
+      ? fetchLeverBoards(byATS.lever, fetchOptions)
+      : { jobs: [], errors: [], stats: { total: 0, successful: 0, failed: 0, jobsFound: 0 } },
+    byATS.ashby.length > 0
+      ? fetchAshbyBoards(byATS.ashby, fetchOptions)
+      : { jobs: [], errors: [], stats: { total: 0, successful: 0, failed: 0, jobsFound: 0 } },
+  ]);
+
+  // Combine results
+  const allJobs = [...ghResult.jobs, ...leverResult.jobs, ...ashbyResult.jobs];
+  const allErrors = [...ghResult.errors, ...leverResult.errors, ...ashbyResult.errors];
+
+  const stats = {
+    total: ghResult.stats.total + leverResult.stats.total + ashbyResult.stats.total,
+    successful: ghResult.stats.successful + leverResult.stats.successful + ashbyResult.stats.successful,
+    failed: ghResult.stats.failed + leverResult.stats.failed + ashbyResult.stats.failed,
+    jobsFound: ghResult.stats.jobsFound + leverResult.stats.jobsFound + ashbyResult.stats.jobsFound,
+    byATS: {
+      greenhouse: ghResult.stats,
+      lever: leverResult.stats,
+      ashby: ashbyResult.stats,
+    },
+  };
+
+  if (verbose && allErrors.length > 0) {
+    console.log(`\nErrors (${allErrors.length}):`);
+    for (const err of allErrors.slice(0, 5)) {
       console.log(`  ${err.company}: ${err.error}`);
     }
-    if (result.errors.length > 5) {
-      console.log(`  ... and ${result.errors.length - 5} more`);
+    if (allErrors.length > 5) {
+      console.log(`  ... and ${allErrors.length - 5} more`);
     }
   }
 
-  return result;
+  return { jobs: allJobs, errors: allErrors, stats };
 }
 
-// Fetch from email alerts (stub - would integrate with gmcli)
+// Fetch from email alerts via AgentMail
 async function fetchFromEmail(options) {
   const { since, verbose } = options;
 
@@ -237,9 +277,25 @@ async function fetchFromEmail(options) {
     console.log(`Checking email alerts from last ${since} hours...`);
   }
 
-  // This would call gmcli to search for job alerts
-  // For now, return empty - the /job email command handles this interactively
-  return { jobs: [], stats: { total: 0, parsed: 0 } };
+  try {
+    const result = await parseJobAlertEmails({ since, verbose });
+
+    return {
+      jobs: result.jobs,
+      stats: {
+        total: result.stats.emailsChecked,
+        parsed: result.stats.jobsFound,
+        wttj: result.stats.wttjEmails,
+        wellfound: result.stats.wellfoundEmails,
+      },
+      error: result.error,
+    };
+  } catch (err) {
+    if (verbose) {
+      console.log(`Email parsing error: ${err.message}`);
+    }
+    return { jobs: [], stats: { total: 0, parsed: 0 }, error: err.message };
+  }
 }
 
 // Fetch from LinkedIn (stub - requires browser)
@@ -310,19 +366,42 @@ function formatOutput(results, options) {
   if (results.sources.ats) {
     const ats = results.sources.ats.stats;
     console.log("║                                                              ║");
-    console.log("║  ATS (Greenhouse)                                            ║");
+    console.log("║  ATS APIs                                                    ║");
     console.log("║  ───────────────────────────────────────                     ║");
     console.log(`║  Boards fetched: ${ats.successful}/${ats.total}`.padEnd(63) + "║");
     console.log(`║  Product jobs found: ${ats.jobsFound}`.padEnd(63) + "║");
+
+    // Show breakdown by ATS type if available
+    if (ats.byATS) {
+      const breakdown = [];
+      if (ats.byATS.greenhouse?.jobsFound > 0) {
+        breakdown.push(`GH:${ats.byATS.greenhouse.jobsFound}`);
+      }
+      if (ats.byATS.lever?.jobsFound > 0) {
+        breakdown.push(`Lever:${ats.byATS.lever.jobsFound}`);
+      }
+      if (ats.byATS.ashby?.jobsFound > 0) {
+        breakdown.push(`Ashby:${ats.byATS.ashby.jobsFound}`);
+      }
+      if (breakdown.length > 0) {
+        console.log(`║    (${breakdown.join(", ")})`.padEnd(63) + "║");
+      }
+    }
   }
 
   if (results.sources.email) {
     const email = results.sources.email.stats;
     console.log("║                                                              ║");
-    console.log("║  Email Alerts                                                ║");
+    console.log("║  Email Alerts (WTTJ + Wellfound)                             ║");
     console.log("║  ───────────────────────────────────────                     ║");
     console.log(`║  Emails checked: ${email.total}`.padEnd(63) + "║");
     console.log(`║  Jobs parsed: ${email.parsed}`.padEnd(63) + "║");
+    if (email.wttj > 0 || email.wellfound > 0) {
+      console.log(`║    (WTTJ: ${email.wttj || 0}, Wellfound: ${email.wellfound || 0})`.padEnd(63) + "║");
+    }
+    if (results.sources.email.error) {
+      console.log(`║  ⚠ Error: ${results.sources.email.error.slice(0, 45)}`.padEnd(63) + "║");
+    }
   }
 
   if (results.sources.linkedin) {
