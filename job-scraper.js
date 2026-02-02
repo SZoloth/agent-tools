@@ -84,80 +84,216 @@ const SELECTORS = {
 // ============================================================================
 
 async function extractJobsFromPage(page) {
-  const jobs = await page.evaluate((selectors) => {
+  // Modern extraction: find job links, walk up to card, extract structured data
+  let jobs = await page.evaluate(() => {
     const results = [];
 
-    // Helper to try multiple selectors
-    function querySelector(parent, selectorList) {
-      for (const sel of selectorList) {
-        const el = parent.querySelector(sel);
-        if (el) return el;
-      }
-      return null;
-    }
+    // Find all job-related links
+    const jobLinks = Array.from(document.querySelectorAll('a'))
+      .filter(a => {
+        const text = a.textContent?.trim();
+        const href = a.href;
+        return text && text.length > 5 && text.length < 150 &&
+               (href.includes('/jobs/view/') || href.includes('currentJobId'));
+      });
 
-    function querySelectorAll(parent, selectorList) {
-      for (const sel of selectorList) {
-        const els = parent.querySelectorAll(sel);
-        if (els.length > 0) return Array.from(els);
-      }
-      return [];
-    }
-
-    // Find all job cards
-    const cards = querySelectorAll(document, selectors.jobCards);
-
-    for (const card of cards) {
+    for (const link of jobLinks) {
       try {
-        // Extract title and URL
-        const titleEl = querySelector(card, selectors.title);
-        const title = titleEl?.textContent?.trim() || null;
+        const text = link.textContent?.trim();
 
-        // Get job URL from link
-        let jobUrl = null;
+        // Skip UI elements
+        if (!text || text.includes('Save') || text.includes('Apply') || text.includes('Premium')) continue;
+
+        // Get job ID
         let jobId = null;
-        const link = titleEl?.tagName === 'A' ? titleEl : card.querySelector('a[href*="/jobs/view/"]');
-        if (link) {
-          jobUrl = link.href;
-          const match = jobUrl.match(/\/jobs\/view\/(\d+)/);
-          if (match) jobId = match[1];
+        const hrefMatch = link.href.match(/\/jobs\/view\/(\d+)/);
+        const currentJobMatch = link.href.match(/currentJobId=(\d+)/);
+        jobId = hrefMatch?.[1] || currentJobMatch?.[1];
+
+        if (!jobId) continue;
+
+        // Find card container by walking up DOM
+        let card = link;
+        for (let i = 0; i < 8; i++) {
+          card = card.parentElement;
+          if (!card) break;
+          const cardText = card.textContent || '';
+          if ((cardText.includes('$') || cardText.includes('ago') || cardText.includes('Promoted')) && cardText.length > 50) break;
         }
 
-        // Extract company
-        const companyEl = querySelector(card, selectors.company);
-        const company = companyEl?.textContent?.trim() || null;
+        // Extract title - clean up duplicates and whitespace
+        let title = text.replace(/\s*with verification\s*/gi, '')
+                        .replace(/\n+/g, ' ')
+                        .replace(/\s{2,}/g, ' ')
+                        .trim();
+        // Remove duplicate title (LinkedIn sometimes renders twice)
+        const halfLen = Math.floor(title.length / 2);
+        const firstHalf = title.substring(0, halfLen).trim();
+        const secondHalf = title.substring(halfLen).trim();
+        if (firstHalf === secondHalf) {
+          title = firstHalf;
+        }
+
+        // Extract company - try multiple methods
+        let company = 'Unknown';
+        if (card) {
+          // Method 1: Company link
+          const companyLink = card.querySelector('a[href*="/company/"]');
+          if (companyLink) {
+            company = companyLink.textContent?.trim().replace(/\n/g, ' ').replace(/\s+/g, ' ') || 'Unknown';
+          }
+
+          // Method 2: Look for text patterns after title
+          if (company === 'Unknown') {
+            const cardText = card.innerText || '';
+            const lines = cardText.split('\n').map(l => l.trim()).filter(l => l && l.length > 1);
+            for (const line of lines) {
+              if (line.includes(title.substring(0, 15))) continue;
+              if (line.length > 2 && line.length < 50 &&
+                  !line.match(/^\$/) &&
+                  !line.match(/^(Remote|Hybrid|On-site)/i) &&
+                  !line.match(/\d+ (day|week|hour|month)/i) &&
+                  !line.match(/Promoted|Viewed/i)) {
+                company = line;
+                break;
+              }
+            }
+          }
+        }
 
         // Extract location
-        const locationEl = querySelector(card, selectors.location);
-        const location = locationEl?.textContent?.trim() || null;
+        let location = 'Unknown';
+        if (card) {
+          const cardText = card.innerText || '';
+          const lines = cardText.split('\n').map(l => l.trim()).filter(l => l);
+
+          for (const line of lines) {
+            if (line.includes(title.substring(0, 15))) continue;
+            if (line === company) continue;
+            if (line.match(/^\$/)) continue;
+            if (line.match(/\d+ (day|week|hour|month)/i)) continue;
+            if (line.match(/Promoted|Viewed|benefit|connection/i)) continue;
+
+            const cityStateMatch = line.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*[A-Z]{2})\s*\(?(Hybrid|Remote|On-site)?\)?$/i);
+            if (cityStateMatch) {
+              location = cityStateMatch[1] + (cityStateMatch[2] ? ` (${cityStateMatch[2]})` : '');
+              break;
+            }
+
+            const workTypeMatch = line.match(/^(Remote|Hybrid|On-site)$/i);
+            if (workTypeMatch) {
+              location = workTypeMatch[1];
+              break;
+            }
+          }
+        }
+
+        // Extract salary
+        let salary = null;
+        if (card) {
+          const salaryMatch = card.textContent?.match(/\$[\d,]+(?:K)?(?:\/yr)?\s*[-–]\s*\$[\d,]+(?:K)?/i);
+          if (salaryMatch) salary = salaryMatch[0];
+        }
 
         // Extract posted time
-        const timeEl = querySelector(card, selectors.postedTime);
-        const postedTime = timeEl?.textContent?.trim() || timeEl?.getAttribute('datetime') || null;
-
-        // Get data attributes as fallback
-        const dataJobId = card.getAttribute('data-occludable-job-id') ||
-                          card.getAttribute('data-job-id');
-
-        if (title || dataJobId) {
-          results.push({
-            title: title || 'Unknown',
-            company: company || 'Unknown',
-            location: location || 'Unknown',
-            postedTime: postedTime || null,
-            jobUrl: jobUrl || (dataJobId ? `https://www.linkedin.com/jobs/view/${dataJobId}` : null),
-            jobId: jobId || dataJobId || null,
-            scrapedAt: new Date().toISOString(),
-          });
+        let postedTime = null;
+        if (card) {
+          const timeMatch = card.textContent?.match(/(\d+\s+(?:hour|day|week|month)s?\s+ago)/i);
+          if (timeMatch) postedTime = timeMatch[1];
         }
+
+        results.push({
+          jobId,
+          title: title.substring(0, 100),
+          company: company.substring(0, 60),
+          location,
+          salary,
+          postedTime,
+          jobUrl: `https://www.linkedin.com/jobs/view/${jobId}`,
+          scrapedAt: new Date().toISOString(),
+        });
       } catch (err) {
-        // Skip malformed cards
-        console.error('Error parsing card:', err);
+        // Skip malformed entries
       }
     }
 
-    return results;
-  }, SELECTORS);
+    // Deduplicate by jobId
+    const seen = new Set();
+    return results.filter(job => {
+      if (seen.has(job.jobId)) return false;
+      seen.add(job.jobId);
+      return true;
+    });
+  });
+
+  // Strategy 2: Fallback to old selector-based approach
+  if (jobs.length === 0) {
+    jobs = await page.evaluate((selectors) => {
+      const results = [];
+
+      function querySelector(parent, selectorList) {
+        for (const sel of selectorList) {
+          const el = parent.querySelector(sel);
+          if (el) return el;
+        }
+        return null;
+      }
+
+      function querySelectorAll(parent, selectorList) {
+        for (const sel of selectorList) {
+          const els = parent.querySelectorAll(sel);
+          if (els.length > 0) return Array.from(els);
+        }
+        return [];
+      }
+
+      const cards = querySelectorAll(document, selectors.jobCards);
+
+      for (const card of cards) {
+        try {
+          const titleEl = querySelector(card, selectors.title);
+          const title = titleEl?.textContent?.trim() || null;
+
+          let jobUrl = null;
+          let jobId = null;
+          const link = titleEl?.tagName === 'A' ? titleEl : card.querySelector('a[href*="/jobs/view/"]');
+          if (link) {
+            jobUrl = link.href;
+            const match = jobUrl.match(/\/jobs\/view\/(\d+)/);
+            if (match) jobId = match[1];
+          }
+
+          const companyEl = querySelector(card, selectors.company);
+          const company = companyEl?.textContent?.trim() || null;
+
+          const locationEl = querySelector(card, selectors.location);
+          const location = locationEl?.textContent?.trim() || null;
+
+          const timeEl = querySelector(card, selectors.postedTime);
+          const postedTime = timeEl?.textContent?.trim() || timeEl?.getAttribute('datetime') || null;
+
+          const dataJobId = card.getAttribute('data-occludable-job-id') ||
+                            card.getAttribute('data-job-id');
+
+          if (title || dataJobId) {
+            results.push({
+              title: title || 'Unknown',
+              company: company || 'Unknown',
+              location: location || 'Unknown',
+              postedTime: postedTime || null,
+              jobUrl: jobUrl || (dataJobId ? `https://www.linkedin.com/jobs/view/${dataJobId}` : null),
+              jobId: jobId || dataJobId || null,
+              scrapedAt: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          console.error('Error parsing card:', err);
+        }
+      }
+
+      return results;
+    }, SELECTORS);
+  }
 
   return jobs;
 }
@@ -306,13 +442,19 @@ async function main() {
   });
 
   const pages = await browser.pages();
-  const linkedinPages = pages.filter(p =>
-    p.url().includes('linkedin.com/jobs/search')
-  );
+  const linkedinPages = pages.filter(p => {
+    const url = p.url();
+    return url.includes('linkedin.com/jobs') && (
+      url.includes('/jobs/search') ||
+      url.includes('/jobs/collections/') ||
+      url.includes('/jobs/') ||
+      url.includes('/jobs?')
+    );
+  });
 
   if (linkedinPages.length === 0) {
-    console.error('No LinkedIn job search tabs found');
-    console.error('Run: job-fresh.js --preset all');
+    console.error('No LinkedIn job tabs found');
+    console.error('Open LinkedIn job pages first');
     await browser.disconnect();
     process.exit(1);
   }

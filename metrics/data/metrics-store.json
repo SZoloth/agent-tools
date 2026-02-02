@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-01-26T18:54:36.764Z",
+  "last_updated": "2026-01-31T00:02:42.861Z",
   "things": {
     "last_analyzed": "2026-01-21T17:10:45.924Z",
     "period_weeks": 4,
@@ -73,15 +73,15 @@
     }
   },
   "impact": {
-    "total": 19,
+    "total": 47,
     "byType": {
-      "coaching": 5,
-      "decision": 5,
-      "quick": 1,
-      "quote": 4,
-      "artifact": 4
+      "coaching": 11,
+      "decision": 11,
+      "quick": 10,
+      "quote": 7,
+      "artifact": 8
     },
-    "lastAggregated": "2026-01-26T18:54:36.764Z",
-    "lastWeekCount": 15
+    "lastAggregated": "2026-01-31T00:02:42.861Z",
+    "lastWeekCount": 28
   }
 }
