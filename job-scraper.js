@@ -11,6 +11,7 @@
  *   job-scraper.js --all              # Scrape all open LinkedIn job tabs
  *   job-scraper.js --scroll           # Scroll to load more results first
  *   job-scraper.js --output file.json # Output to specific file
+ *   job-scraper.js --json             # JSON summary output
  *
  * Prerequisites:
  *   - Chrome running with remote debugging (browser-start.js --profile)
@@ -418,13 +419,19 @@ async function main() {
   let scrapeAll = false;
   let doScroll = false;
   let outputPath = null;
+  let jsonOutput = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--all' || arg === '-a') scrapeAll = true;
     if (arg === '--scroll' || arg === '-s') doScroll = true;
     if (arg === '--output' || arg === '-o') outputPath = args[++i];
+    if (arg === '--json') jsonOutput = true;
   }
+
+  const log = (...parts) => {
+    if (!jsonOutput) console.log(...parts);
+  };
 
   // Connect to Chrome
   const browser = await Promise.race([
@@ -459,12 +466,13 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`\nFound ${linkedinPages.length} LinkedIn job search tab(s)\n`);
+  log(`\nFound ${linkedinPages.length} LinkedIn job search tab(s)\n`);
 
   const cache = loadCache();
   let totalNew = 0;
   let totalUpdated = 0;
   const allJobs = [];
+  const pageSummaries = [];
 
   const pagesToScrape = scrapeAll ? linkedinPages : [linkedinPages[linkedinPages.length - 1]];
 
@@ -473,23 +481,23 @@ async function main() {
     const urlParams = new URL(url).searchParams;
     const keywords = urlParams.get('keywords') || 'unknown';
 
-    console.log(`Scraping: "${keywords}"`);
-    console.log(`  URL: ${url.substring(0, 80)}...`);
+    log(`Scraping: "${keywords}"`);
+    log(`  URL: ${url.substring(0, 80)}...`);
 
     if (doScroll) {
-      console.log('  Scrolling to load more...');
+      log('  Scrolling to load more...');
       await scrollToLoadMore(page);
     }
 
     // Try DOM extraction first
     let jobs = await extractJobsFromPage(page);
-    console.log(`  DOM extraction: ${jobs.length} listings`);
+    log(`  DOM extraction: ${jobs.length} listings`);
 
     // If DOM extraction fails, try accessibility tree
     if (jobs.length === 0) {
-      console.log('  Trying accessibility tree fallback...');
+      log('  Trying accessibility tree fallback...');
       jobs = await extractJobsFromA11y(page);
-      console.log(`  A11y extraction: ${jobs.length} listings`);
+      log(`  A11y extraction: ${jobs.length} listings`);
     }
 
     // Add source info
@@ -500,7 +508,14 @@ async function main() {
     totalNew += newCount;
     totalUpdated += updateCount;
 
-    console.log(`  New: ${newCount}, Updated: ${updateCount}\n`);
+    pageSummaries.push({
+      keywords,
+      url,
+      scraped: jobs.length,
+      newCount,
+      updateCount,
+    });
+    log(`  New: ${newCount}, Updated: ${updateCount}\n`);
   }
 
   // Save cache
@@ -510,22 +525,43 @@ async function main() {
   const totalInCache = Object.keys(cache.listings).length;
   const newListings = Object.values(cache.listings).filter(l => l.status === 'new');
 
-  console.log('─'.repeat(50));
-  console.log(`Total scraped this run: ${allJobs.length}`);
-  console.log(`New listings added: ${totalNew}`);
-  console.log(`Existing updated: ${totalUpdated}`);
-  console.log(`Total in cache: ${totalInCache}`);
-  console.log(`Awaiting qualification: ${newListings.length}`);
-  console.log('─'.repeat(50));
-  console.log(`Cache saved to: ${CACHE_PATH}`);
+  const result = {
+    action: 'scrape',
+    scrapeAll,
+    doScroll,
+    linkedinTabs: linkedinPages.length,
+    pagesScraped: pageSummaries.length,
+    totalScrapedThisRun: allJobs.length,
+    newListingsAdded: totalNew,
+    existingUpdated: totalUpdated,
+    totalInCache,
+    awaitingQualification: newListings.length,
+    cachePath: CACHE_PATH,
+    pageSummaries,
+  };
+
+  if (!jsonOutput) {
+    console.log('─'.repeat(50));
+    console.log(`Total scraped this run: ${allJobs.length}`);
+    console.log(`New listings added: ${totalNew}`);
+    console.log(`Existing updated: ${totalUpdated}`);
+    console.log(`Total in cache: ${totalInCache}`);
+    console.log(`Awaiting qualification: ${newListings.length}`);
+    console.log('─'.repeat(50));
+    console.log(`Cache saved to: ${CACHE_PATH}`);
+  }
 
   // Optional: output to specific file
   if (outputPath) {
     fs.writeFileSync(outputPath, JSON.stringify(allJobs, null, 2));
-    console.log(`Raw output saved to: ${outputPath}`);
+    result.rawOutputPath = outputPath;
+    log(`Raw output saved to: ${outputPath}`);
   }
 
   await browser.disconnect();
+  if (jsonOutput) {
+    console.log(JSON.stringify(result, null, 2));
+  }
 }
 
 main().catch((err) => {

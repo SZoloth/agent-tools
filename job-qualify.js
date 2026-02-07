@@ -31,7 +31,7 @@ const CACHE_PATH = path.join(
   ".claude/state/job-listings-cache.json"
 );
 
-const DEFAULT_THRESHOLD = 65;
+const DEFAULT_THRESHOLD = 70;
 
 // ============================================================================
 // CMF SWEET SPOTS - From job-search-context.md
@@ -496,10 +496,71 @@ function main() {
     if (arg === "--json" || arg === "-j") jsonOutput = true;
   }
 
+  const log = (...parts) => {
+    if (!jsonOutput) console.log(...parts);
+  };
+
   const cache = loadCache();
+
+  // Merge jobs from Python discovery daemon (email alerts)
+  const discoveredPath = '/Users/samuelz/Documents/LLM CONTEXT/1 - personal/job_search/automation/discovered_jobs.json';
+  if (fs.existsSync(discoveredPath)) {
+    try {
+      const discovered = JSON.parse(fs.readFileSync(discoveredPath, 'utf8'));
+      let mergedCount = 0;
+
+      // Handle both array format and object with jobs array
+      const jobs = Array.isArray(discovered) ? discovered : (discovered.jobs || []);
+
+      for (const job of jobs) {
+        // Generate jobId from job data if not present
+        const jobId = job.jobId || job.id || `email_${job.company}_${job.title}`.toLowerCase().replace(/\s+/g, '_');
+
+        // Skip if already in cache
+        if (cache.listings[jobId]) continue;
+
+        // Add to cache with source marker
+        cache.listings[jobId] = {
+          title: job.title || 'Unknown Title',
+          company: job.company || 'Unknown Company',
+          location: job.location || '',
+          jobUrl: job.url || job.jobUrl || '',
+          postedTime: job.postedTime || job.posted || null,
+          salaryMin: job.salaryMin || null,
+          salaryMax: job.salaryMax || null,
+          source: 'email_alert',
+          discoveredAt: job.discoveredAt || new Date().toISOString(),
+          addedAt: new Date().toISOString(),
+          score: null,
+          status: 'new'
+        };
+        mergedCount++;
+      }
+
+      if (mergedCount > 0) {
+        log(`Merged ${mergedCount} jobs from email alerts`);
+        saveCache(cache);
+      }
+    } catch (err) {
+      console.error('Error merging discovered jobs:', err.message);
+    }
+  }
   const listings = Object.entries(cache.listings);
 
   if (listings.length === 0) {
+    if (jsonOutput) {
+      console.log(
+        JSON.stringify({
+          scoredThisRun: 0,
+          qualifiedThisRun: 0,
+          totalInCache: 0,
+          totalQualified: 0,
+          totalBelowThreshold: 0,
+          threshold,
+        })
+      );
+      return;
+    }
     console.log("No listings in cache. Run job-scraper.js first.");
     process.exit(0);
   }

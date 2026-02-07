@@ -629,6 +629,9 @@ async function main() {
 
   // Save to output directory if specified
   if (outputDir) {
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
     const jsonPath = path.join(outputDir, "research.json");
     fs.writeFileSync(jsonPath, JSON.stringify(research, null, 2));
     console.error(`\nSaved research to: ${jsonPath}`);

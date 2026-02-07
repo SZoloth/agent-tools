@@ -12,6 +12,8 @@
  *   job-apply-prep.js --all              # Prep all qualified listings
  *   job-apply-prep.js --list             # List qualified jobs awaiting prep
  *   job-apply-prep.js --fetch            # Also fetch job posting content
+ *   job-apply-prep.js --skip-beads       # Skip beads issue creation
+ *   job-apply-prep.js --json             # JSON summary output
  *
  * Creates folder structure at:
  *   ~/Documents/LLM CONTEXT/1 - personal/job_search/Applications/{NN}-{company}/
@@ -23,6 +25,13 @@ import puppeteer from "puppeteer-core";
 import fs from "fs";
 import path from "path";
 import { execFileSync } from "child_process";
+import {
+  ensureJobPipeline,
+  queueIdForEntry,
+  samePipelineEntry,
+  withQueueId,
+  dedupePipelineEntries,
+} from "./job-pipeline-lib.js";
 
 const RESEARCH_CMD = path.join(process.env.HOME, "agent-tools/job-research.js");
 
@@ -39,6 +48,11 @@ const COS_STATE_PATH = path.join(
 const APPLICATIONS_DIR = path.join(
   process.env.HOME,
   "Documents/LLM CONTEXT/1 - personal/job_search/Applications"
+);
+
+const BEADS_CWD = path.join(
+  process.env.HOME,
+  "Documents/LLM CONTEXT/1 - personal"
 );
 
 // ============================================================================
@@ -274,18 +288,21 @@ function createApplicationFolder(listing) {
   const date = new Date().toISOString().split("T")[0];
 
   // Create Application_Research_Notes.md
+  ensureApplicationScaffold(folderPath, listing, date);
+
+  return { folderName, folderPath, folderNum };
+}
+
+function ensureApplicationScaffold(folderPath, listing, date = new Date().toISOString().split("T")[0]) {
   const researchNotesPath = path.join(folderPath, "Application_Research_Notes.md");
   if (!fs.existsSync(researchNotesPath)) {
     fs.writeFileSync(researchNotesPath, generateResearchNotesTemplate(listing));
   }
 
-  // Create Job_Posting_YYYY-MM-DD.md
   const jobPostingPath = path.join(folderPath, `Job_Posting_${date}.md`);
   if (!fs.existsSync(jobPostingPath)) {
     fs.writeFileSync(jobPostingPath, generateJobPostingTemplate(listing));
   }
-
-  return { folderName, folderPath, folderNum };
 }
 
 // ============================================================================
@@ -321,7 +338,13 @@ function runResearchCLI(company, roleTitle) {
 function formatResearchForTemplate(research) {
   if (!research) return null;
 
-  const { company, leadership, hiringManager, companyContent, news } = research;
+  const company = research.company || {};
+  const funding = company.funding || {};
+  const leadership = research.leadership || { ceo: {} };
+  const ceo = leadership.ceo || {};
+  const hiringManager = research.hiringManager || { candidates: [] };
+  const companyContent = research.companyContent || {};
+  const news = Array.isArray(research.news) ? research.news : [];
 
   // Build the populated Company Intelligence section
   let companyIntel = `## Company Intelligence
@@ -331,7 +354,7 @@ function formatResearchForTemplate(research) {
 | Attribute | Value |
 |-----------|-------|
 | **Founded** | ${company.founded || "TBD"} |
-| **Valuation/Revenue** | ${company.funding.stage ? `${company.funding.stage} ` : ""}${company.funding.amount || "TBD"}${company.funding.date ? ` (${company.funding.date})` : ""} |
+| **Valuation/Revenue** | ${funding.stage ? `${funding.stage} ` : ""}${funding.amount || "TBD"}${funding.date ? ` (${funding.date})` : ""} |
 | **Employees** | ${company.size || "TBD"} |
 | **HQ** | ${company.hq || "TBD"} |
 | **Business Model** | ${company.description ? company.description.substring(0, 150) : "TBD"} |
@@ -350,16 +373,16 @@ function formatResearchForTemplate(research) {
   }
 
   // Add leadership info
-  if (leadership.ceo.name) {
-    companyIntel += `**CEO/Founder:** ${leadership.ceo.name}`;
-    if (leadership.ceo.linkedin) companyIntel += ` ([LinkedIn](${leadership.ceo.linkedin}))`;
-    if (leadership.ceo.twitter) companyIntel += ` ([Twitter](${leadership.ceo.twitter}))`;
+  if (ceo.name) {
+    companyIntel += `**CEO/Founder:** ${ceo.name}`;
+    if (ceo.linkedin) companyIntel += ` ([LinkedIn](${ceo.linkedin}))`;
+    if (ceo.twitter) companyIntel += ` ([Twitter](${ceo.twitter}))`;
     companyIntel += "\n\n";
 
-    if (leadership.ceo.recentPosts && leadership.ceo.recentPosts.length > 0) {
+    if (Array.isArray(ceo.recentPosts) && ceo.recentPosts.length > 0) {
       companyIntel += `**Recent CEO Statements:**\n`;
-      for (const post of leadership.ceo.recentPosts.slice(0, 2)) {
-        const content = post.content.substring(0, 120).replace(/\n/g, " ");
+      for (const post of ceo.recentPosts.slice(0, 2)) {
+        const content = String(post.content || "").substring(0, 120).replace(/\n/g, " ");
         companyIntel += `- "${content}..." ([source](${post.url}))\n`;
       }
       companyIntel += "\n";
@@ -536,27 +559,126 @@ function saveCosState(state) {
   fs.writeFileSync(COS_STATE_PATH, JSON.stringify(state, null, 2));
 }
 
-function updateCosStateWithPrep(folderName, listing) {
+function ensureJobPipelineState(state) {
+  ensureJobPipeline(state);
+}
+
+function updateCosStateWithPrep(folderName, listing, beadsIssueId = null) {
   const state = loadCosState();
+  ensureJobPipelineState(state);
 
-  if (!state.job_pipeline) {
-    state.job_pipeline = {
-      last_scrape: null,
-      pending_materials: [],
-      pending_review: [],
-    };
-  }
+  const queueId = listing.queueId || queueIdForEntry({
+    jobId: listing.jobId,
+    folderName,
+    company: listing.company,
+    title: listing.title,
+  });
 
-  state.job_pipeline.pending_materials.push({
+  const removeSameEntry = (entry) => {
+    return samePipelineEntry(entry, { queueId, jobId: listing.jobId, folderName });
+  };
+
+  state.job_pipeline.pending_materials = state.job_pipeline.pending_materials.filter((entry) => !removeSameEntry(entry));
+  state.job_pipeline.materials_ready = state.job_pipeline.materials_ready.filter((entry) => !removeSameEntry(entry));
+  state.job_pipeline.submitted_applications = state.job_pipeline.submitted_applications.filter((entry) => !removeSameEntry(entry));
+
+  state.job_pipeline.pending_materials.push(withQueueId({
+    queueId,
     folderName,
     company: listing.company,
     title: listing.title,
     jobId: listing.jobId,
     score: listing.score,
+    beadsIssueId,
     createdAt: new Date().toISOString(),
-  });
+  }));
+
+  state.job_pipeline.pending_materials = dedupePipelineEntries(state.job_pipeline.pending_materials);
+  state.job_pipeline.materials_ready = dedupePipelineEntries(state.job_pipeline.materials_ready);
+  state.job_pipeline.submitted_applications = dedupePipelineEntries(state.job_pipeline.submitted_applications);
 
   saveCosState(state);
+}
+
+function oneLine(text, maxLength = 80) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function upsertTrackingSection(notesPath, issueId) {
+  if (!issueId || !fs.existsSync(notesPath)) return false;
+
+  let content = fs.readFileSync(notesPath, "utf8");
+  const date = new Date().toISOString().split("T")[0];
+  const block = [
+    "## Tracking",
+    "",
+    `**Beads Issue:** \`${issueId}\``,
+    "**Status:** Open - awaiting materials",
+    `**Created:** ${date}`,
+    "",
+  ].join("\n");
+
+  const trackingRegex = /## Tracking[\s\S]*?(?=\n---\n|\n## |\n\*Next Review|\s*$)/;
+  if (trackingRegex.test(content)) {
+    content = content.replace(trackingRegex, block.trimEnd());
+  } else if (content.includes("## Notes & Updates")) {
+    content = content.replace("## Notes & Updates", `${block}\n## Notes & Updates`);
+  } else {
+    content = `${content.trimEnd()}\n\n${block}`;
+  }
+
+  fs.writeFileSync(notesPath, content);
+  return true;
+}
+
+function createOrReadBeadsIssue(folderName, folderPath, listing) {
+  const issueFile = path.join(folderPath, ".beads-issue");
+  if (fs.existsSync(issueFile)) {
+    const existing = fs.readFileSync(issueFile, "utf8").trim();
+    if (existing) return { issueId: existing, created: false };
+  }
+
+  const shortRole = oneLine(listing.title, 64);
+  const company = oneLine(listing.company, 40);
+  const date = new Date().toISOString().split("T")[0];
+  const title = `Apply to ${company} - ${shortRole}`;
+  const description = `${shortRole}. CMF score: ${listing.score ?? "N/A"}. Apply URL: ${listing.jobUrl || "N/A"}`;
+  const notes = `Folder: ${folderName}. Created ${date}.`;
+
+  try {
+    const output = execFileSync(
+      "bd",
+      [
+        "create",
+        title,
+        "-l",
+        "job search task",
+        "-p",
+        "P1",
+        "-d",
+        description,
+        "--notes",
+        notes,
+        "--silent",
+      ],
+      {
+        cwd: BEADS_CWD,
+        encoding: "utf8",
+        timeout: 30000,
+        stdio: ["pipe", "pipe", "pipe"],
+      }
+    );
+
+    const issueId = output.trim().split("\n").pop();
+    if (!issueId) return { issueId: null, created: false, error: "empty issue id from bd create" };
+    fs.writeFileSync(issueFile, `${issueId}\n`);
+    return { issueId, created: true };
+  } catch (err) {
+    return { issueId: null, created: false, error: err.message };
+  }
 }
 
 // ============================================================================
@@ -571,6 +693,8 @@ async function main() {
   let prepAll = false;
   let listOnly = false;
   let shouldFetch = false;
+  let skipBeads = false;
+  let jsonOutput = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -578,8 +702,14 @@ async function main() {
     else if (arg === "--all" || arg === "-a") prepAll = true;
     else if (arg === "--list" || arg === "-l") listOnly = true;
     else if (arg === "--fetch" || arg === "-f") shouldFetch = true;
+    else if (arg === "--skip-beads") skipBeads = true;
+    else if (arg === "--json") jsonOutput = true;
     else if (!arg.startsWith("-")) jobId = arg;
   }
+
+  const log = (...parts) => {
+    if (!jsonOutput) console.log(...parts);
+  };
 
   const cache = loadCache();
   const listings = Object.entries(cache.listings);
@@ -590,6 +720,20 @@ async function main() {
   );
 
   if (listOnly) {
+    if (jsonOutput) {
+      const listingData = qualified.map(([id, listing]) => ({
+        jobId: id,
+        company: listing.company || null,
+        title: listing.title || null,
+        score: listing.score ?? null,
+      }));
+      console.log(JSON.stringify({
+        action: "list_qualified_for_prep",
+        total: listingData.length,
+        listings: listingData,
+      }, null, 2));
+      return;
+    }
     console.log(`\nQualified listings awaiting prep:\n`);
     console.log("─".repeat(60));
 
@@ -636,30 +780,59 @@ async function main() {
     console.log("  job-apply-prep.js --company X      # Prep by company");
     console.log("  job-apply-prep.js --all            # Prep all qualified");
     console.log("  job-apply-prep.js --list           # List awaiting prep");
+    console.log("  job-apply-prep.js --fetch          # Fetch posting content");
+    console.log("  job-apply-prep.js --skip-beads     # Skip beads issue creation");
+    console.log("  job-apply-prep.js --json           # JSON summary output");
     return;
   }
 
   if (toPrep.length === 0) {
+    if (jsonOutput) {
+      console.log(JSON.stringify({
+        action: "apply_prep",
+        preparedCount: 0,
+        message: "No listings to prep",
+      }, null, 2));
+      return;
+    }
     console.log("No listings to prep.");
     return;
   }
 
-  console.log(`\nPreparing ${toPrep.length} application folder(s)...\n`);
+  const prepared = [];
+  log(`\nPreparing ${toPrep.length} application folder(s)...\n`);
 
   for (const [id, listing] of toPrep) {
-    console.log(`Processing: ${listing.company} - ${listing.title}`);
+    log(`Processing: ${listing.company} - ${listing.title}`);
 
-    // Create folder
-    const { folderName, folderPath } = createApplicationFolder(listing);
-    console.log(`  Created: ${folderName}/`);
+    // Create folder (idempotent reuse if already exists)
+    let folderName;
+    let folderPath;
+    let reusedFolder = false;
+    if (cache.listings[id].applicationFolder) {
+      folderName = cache.listings[id].applicationFolder;
+      folderPath = path.join(APPLICATIONS_DIR, folderName);
+      if (!fs.existsSync(folderPath)) {
+        fs.mkdirSync(folderPath, { recursive: true });
+      }
+      ensureApplicationScaffold(folderPath, listing);
+      reusedFolder = true;
+    } else {
+      const created = createApplicationFolder(listing);
+      folderName = created.folderName;
+      folderPath = created.folderPath;
+    }
+    log(`  ${reusedFolder ? "Reused" : "Created"}: ${folderName}/`);
 
     // Run automated research
-    console.log("  Researching company...");
+    log("  Researching company...");
     const research = runResearchCLI(listing.company, listing.title);
+    let researchPopulated = false;
     if (research) {
       const populated = populateResearchNotes(folderPath, research);
       if (populated) {
-        console.log("  ✓ Research populated");
+        log("  ✓ Research populated");
+        researchPopulated = true;
 
         // Store research summary in cache
         cache.listings[id].research = {
@@ -670,20 +843,50 @@ async function main() {
         };
       }
     } else {
-      console.log("  ⚠ Research skipped (search failed)");
+      log("  ⚠ Research skipped (search failed)");
+    }
+
+    // Create or reuse tracking issue in beads
+    let beadsIssueId = null;
+    if (skipBeads) {
+      log("  ⚠ Beads skipped (--skip-beads)");
+    } else {
+      const beadsResult = createOrReadBeadsIssue(folderName, folderPath, listing);
+      if (beadsResult.issueId) {
+        beadsIssueId = beadsResult.issueId;
+        const notesPath = path.join(folderPath, "Application_Research_Notes.md");
+        upsertTrackingSection(notesPath, beadsIssueId);
+        if (beadsResult.created) {
+          log(`  ✓ Beads issue created: ${beadsIssueId}`);
+        } else {
+          log(`  ✓ Beads issue linked: ${beadsIssueId}`);
+        }
+      } else {
+        log(`  ⚠ Beads issue unavailable: ${beadsResult.error || "unknown error"}`);
+      }
     }
 
     // Update cache with folder reference
+    const queueId = cache.listings[id].queueId || queueIdForEntry({
+      jobId: id,
+      folderName,
+      company: listing.company,
+      title: listing.title,
+    });
+    cache.listings[id].queueId = queueId;
     cache.listings[id].applicationFolder = folderName;
     cache.listings[id].status = "prepped";
     cache.listings[id].preppedAt = new Date().toISOString();
+    if (beadsIssueId) {
+      cache.listings[id].beadsIssueId = beadsIssueId;
+    }
 
     // Update cos-state
-    updateCosStateWithPrep(folderName, listing);
+    updateCosStateWithPrep(folderName, listing, beadsIssueId);
 
     // Optionally fetch job posting content
     if (shouldFetch && listing.jobUrl) {
-      console.log("  Fetching job posting content...");
+      log("  Fetching job posting content...");
       const content = await fetchJobPosting(listing.jobUrl);
       if (content) {
         const date = new Date().toISOString().split("T")[0];
@@ -694,16 +897,38 @@ async function main() {
           content
         );
         fs.writeFileSync(postingPath, existing);
-        console.log("  Job description captured!");
+        log("  Job description captured!");
       } else {
-        console.log("  Could not fetch job description.");
+        log("  Could not fetch job description.");
       }
     }
 
-    console.log("");
+    prepared.push({
+      queueId: cache.listings[id].queueId || null,
+      jobId: id,
+      company: listing.company || null,
+      title: listing.title || null,
+      folderName,
+      reusedFolder,
+      beadsIssueId: beadsIssueId || null,
+      researchPopulated,
+      fetchedPosting: Boolean(shouldFetch && listing.jobUrl),
+    });
+
+    log("");
   }
 
   saveCache(cache);
+
+  if (jsonOutput) {
+    console.log(JSON.stringify({
+      action: "apply_prep",
+      preparedCount: prepared.length,
+      applicationsDir: APPLICATIONS_DIR,
+      prepared,
+    }, null, 2));
+    return;
+  }
 
   console.log("─".repeat(60));
   console.log(`Folders created: ${toPrep.length}`);

@@ -16,6 +16,7 @@
  *   job-fresh.js --hours 2          # Last 2 hours only
  *   job-fresh.js --company canva    # Filter to specific company
  *   job-fresh.js --list             # List all presets
+ *   job-fresh.js --json             # JSON summary output
  */
 
 import { execFileSync, spawnSync } from 'child_process';
@@ -182,12 +183,12 @@ function isChromeRunning() {
   }
 }
 
-async function ensureChromeRunning() {
+async function ensureChromeRunning(quiet = false) {
   if (isChromeRunning()) {
     return true;
   }
 
-  console.log('Starting Chrome with profile...');
+  if (!quiet) console.log('Starting Chrome with profile...');
   const browserStart = path.join(BROWSER_TOOLS, 'browser-start.js');
 
   try {
@@ -196,21 +197,22 @@ async function ensureChromeRunning() {
     await new Promise(r => setTimeout(r, 2000));
   } catch (err) {
     console.error('Failed to start Chrome:', err.message);
+    return false;
   }
 
-  return true;
+  return isChromeRunning();
 }
 
-async function openInChrome(url, newTab = false) {
+async function openInChrome(url, newTab = false, quiet = false) {
   const browserNav = path.join(BROWSER_TOOLS, 'browser-nav.js');
   // browser-nav.js expects: <url> [--new]
   const args = newTab ? [browserNav, url, '--new'] : [browserNav, url];
 
   try {
-    execFileSync('node', args, { stdio: 'inherit' });
+    execFileSync('node', args, { stdio: quiet ? 'pipe' : 'inherit' });
   } catch (err) {
     // Fallback to system open - explicitly target Chrome (not default browser)
-    console.log('Browser tools failed, falling back to Chrome...');
+    if (!quiet) console.log('Browser tools failed, falling back to Chrome...');
     execFileSync('open', ['-a', 'Google Chrome', url]);
   }
 }
@@ -253,11 +255,25 @@ async function main() {
   let remote = false;
   let location = DEFAULT_LOCATION;
   let customKeywords = null;
+  let jsonOutput = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
+    if (arg === '--json') {
+      jsonOutput = true;
+      continue;
+    }
+
     if (arg === '--list' || arg === '-l') {
+      if (jsonOutput) {
+        console.log(JSON.stringify({
+          presets: PRESETS,
+          targetCompanies: TARGET_COMPANIES,
+          locations: LOCATIONS,
+        }, null, 2));
+        return;
+      }
       listPresets();
       return;
     }
@@ -293,28 +309,69 @@ async function main() {
   }
 
   // Ensure Chrome is running with profile
-  await ensureChromeRunning();
+  const chromeReady = await ensureChromeRunning(jsonOutput);
+  if (!chromeReady) {
+    console.error('Chrome is not available on localhost:9222. Start it with browser-start.js --profile and retry.');
+    process.exit(1);
+  }
 
   const options = { hours, company, remote, location };
+  const openedSearches = [];
 
   // Handle "all" preset - open each in new tab
   if (preset === 'all') {
-    console.log(`\n🔍 Opening all presets (last ${hours} hours)...\n`);
+    if (!jsonOutput) console.log(`\n🔍 Opening all presets (last ${hours} hours)...\n`);
 
     let first = true;
+    let tabCount = 0;
+
+    // Open location-filtered searches for each preset
     for (const [key, presetConfig] of Object.entries(PRESETS)) {
       const keyword = presetConfig.keywords[0];
       const url = buildLinkedInUrl(keyword, options);
 
-      console.log(`  → ${presetConfig.name}: ${keyword}`);
-      await openInChrome(url, !first);
+      if (!jsonOutput) console.log(`  → ${presetConfig.name}: ${keyword}`);
+      await openInChrome(url, !first, jsonOutput);
+      openedSearches.push({ type: 'preset', preset: key, name: presetConfig.name, keyword, url });
       first = false;
+      tabCount++;
 
       // Small delay between tabs
       await new Promise(r => setTimeout(r, 500));
     }
 
-    console.log(`\n✅ Opened ${Object.keys(PRESETS).length} searches`);
+    // Add remote-only searches for key presets (strategy, pm, founding)
+    const remotePresets = ['strategy', 'pm', 'founding'];
+    const remoteOptions = { ...options, remote: true, location: null };
+
+    if (!jsonOutput) console.log('\n  📡 Remote-only searches:');
+    for (const key of remotePresets) {
+      const presetConfig = PRESETS[key];
+      const keyword = presetConfig.keywords[0];
+      const url = buildLinkedInUrl(keyword, remoteOptions);
+
+      if (!jsonOutput) console.log(`  → ${presetConfig.name} (Remote): ${keyword}`);
+      await openInChrome(url, true, jsonOutput);
+      openedSearches.push({ type: 'remote', preset: key, name: presetConfig.name, keyword, url });
+      tabCount++;
+
+      await new Promise(r => setTimeout(r, 500));
+    }
+
+    const result = {
+      action: 'fresh_open',
+      preset,
+      hours,
+      tabCount,
+      openedSearches,
+      remoteSearchCount: remotePresets.length,
+      localSearchCount: Object.keys(PRESETS).length,
+    };
+    if (jsonOutput) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`\n✅ Opened ${tabCount} searches (${Object.keys(PRESETS).length} local + ${remotePresets.length} remote)`);
     console.log(`   Freshness: last ${hours} hours (${hoursToSeconds(hours)} seconds)`);
     return;
   }
@@ -337,15 +394,29 @@ async function main() {
 
   const url = buildLinkedInUrl(keywords, options);
 
-  console.log(`\n🔍 ${searchName} Search`);
-  console.log(`   Keywords: ${keywords}`);
-  console.log(`   Freshness: last ${hours} hours (${hoursToSeconds(hours)} seconds)`);
-  if (company) console.log(`   Company: ${company}`);
-  if (remote) console.log(`   Remote only: yes`);
-  console.log('');
+  if (!jsonOutput) {
+    console.log(`\n🔍 ${searchName} Search`);
+    console.log(`   Keywords: ${keywords}`);
+    console.log(`   Freshness: last ${hours} hours (${hoursToSeconds(hours)} seconds)`);
+    if (company) console.log(`   Company: ${company}`);
+    if (remote) console.log(`   Remote only: yes`);
+    console.log('');
+  }
 
-  await openInChrome(url);
+  await openInChrome(url, false, jsonOutput);
+  openedSearches.push({ type: customKeywords ? 'custom' : 'preset', preset, name: searchName, keyword: keywords, url });
 
+  const result = {
+    action: 'fresh_open',
+    preset,
+    hours,
+    tabCount: 1,
+    openedSearches,
+  };
+  if (jsonOutput) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
   console.log('✅ Opened in Chrome');
 }
 
