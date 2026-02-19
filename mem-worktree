@@ -1,0 +1,185 @@
+#!/bin/bash
+
+MEMORY_ROOT="$HOME/.claude/memory-v2"
+WORKTREES_DIR="$MEMORY_ROOT/worktrees"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+${BLUE}mem-worktree${NC} - Multi-agent worktree manager
+
+Usage: mem-worktree <command> [options]
+
+Commands:
+    create <agent> <branch>   Create worktree for subagent
+    merge <agent> <branch>     Merge worktree back to main
+    list                      List all worktrees
+    status <branch>           Show worktree status
+    delete <branch>           Delete a worktree
+
+Examples:
+    mem-worktree create claude-code subagent-1
+    mem-worktree merge claude-code subagent-1
+    mem-worktree list
+
+EOF
+    exit 1
+}
+
+create_worktree() {
+    local agent="$1"
+    local branch="$2"
+    
+    if [ -z "$agent" ] || [ -z "$branch" ]; then
+        echo -e "${RED}Usage: mem-worktree create <agent> <branch>${NC}"
+        return 1
+    fi
+    
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    if [ ! -d "$agent_dir" ]; then
+        echo -e "${RED}Agent $agent not found${NC}"
+        return 1
+    fi
+    
+    mkdir -p "$WORKTREES_DIR"
+    
+    local worktree_path="$WORKTREES_DIR/$agent-$branch"
+    
+    if [ -d "$worktree_path" ]; then
+        echo -e "${YELLOW}Worktree already exists: $worktree_path${NC}"
+        return 1
+    fi
+    
+    cd "$MEMORY_ROOT"
+    
+    if git rev-parse --verify "$branch" >/dev/null 2>&1; then
+        echo -e "${YELLOW}Branch $branch already exists, checking out${NC}"
+    else
+        git branch "$branch" HEAD
+        echo -e "${GREEN}✓ Created branch: $branch${NC}"
+    fi
+    
+    git worktree add "$worktree_path" "$branch"
+    
+    echo -e "${GREEN}✓ Created worktree: $worktree_path${NC}"
+    echo -e "${BLUE}Work in: cd $worktree_path${NC}"
+    echo -e "${BLUE}When done: mem-worktree merge $agent $branch${NC}"
+}
+
+merge_worktree() {
+    local agent="$1"
+    local branch="$2"
+    
+    if [ -z "$agent" ] || [ -z "$branch" ]; then
+        echo -e "${RED}Usage: mem-worktree merge <agent> <branch>${NC}"
+        return 1
+    fi
+    
+    local worktree_path="$WORKTREES_DIR/$agent-$branch"
+    
+    if [ ! -d "$worktree_path" ]; then
+        echo -e "${RED}Worktree not found: $worktree_path${NC}"
+        return 1
+    fi
+    
+    cd "$MEMORY_ROOT"
+    
+    git fetch origin 2>/dev/null || true
+    
+    local merge_result=$(git merge "$branch" --no-edit 2>&1)
+    local merge_status=$?
+    
+    if [ $merge_status -ne 0 ]; then
+        echo -e "${YELLOW}Merge conflicts detected:${NC}"
+        echo "$merge_result"
+        echo -e "${YELLOW}Resolve conflicts manually, then run:${NC}"
+        echo -e "  cd $MEMORY_ROOT && git add -A && git commit -m 'Merge $branch'"
+        return 1
+    fi
+    
+    git worktree remove "$worktree_path"
+    git branch -d "$branch"
+    
+    echo -e "${GREEN}✓ Merged $branch and cleaned up worktree${NC}"
+}
+
+list_worktrees() {
+    cd "$MEMORY_ROOT"
+    
+    echo -e "${BLUE}Git worktrees:${NC}"
+    git worktree list
+    
+    echo ""
+    echo -e "${BLUE}Branches:${NC}"
+    git branch --list
+}
+
+show_status() {
+    local branch="${1:-HEAD}"
+    
+    cd "$MEMORY_ROOT"
+    
+    echo -e "${BLUE}Status of $branch:${NC}"
+    git status --short "$branch"
+    
+    echo ""
+    echo -e "${BLUE}Diff from main:${NC}"
+    git diff main.."$branch" --stat 2>/dev/null || git diff HEAD.."$branch" --stat
+}
+
+delete_worktree() {
+    local branch="$1"
+    
+    if [ -z "$branch" ]; then
+        echo -e "${RED}Usage: mem-worktree delete <branch>${NC}"
+        return 1
+    fi
+    
+    local worktree_path=""
+    for wt in "$WORKTREES_DIR"/*; do
+        if [ -d "$wt" ] && [[ $(basename "$wt") == *"$branch"* ]]; then
+            worktree_path="$wt"
+            break
+        fi
+    done
+    
+    cd "$MEMORY_ROOT"
+    
+    if [ -n "$worktree_path" ]; then
+        git worktree remove "$worktree_path" --force
+    fi
+    
+    if git rev-parse --verify "$branch" >/dev/null 2>&1; then
+        git branch -D "$branch"
+        echo -e "${GREEN}✓ Deleted branch: $branch${NC}"
+    else
+        echo -e "${YELLOW}Branch $branch not found${NC}"
+    fi
+}
+
+case "$1" in
+    create)
+        create_worktree "$2" "$3"
+        ;;
+    merge)
+        merge_worktree "$2" "$3"
+        ;;
+    list)
+        list_worktrees
+        ;;
+    status)
+        show_status "$2"
+        ;;
+    delete)
+        delete_worktree "$2"
+        ;;
+    *)
+        usage
+        ;;
+esac

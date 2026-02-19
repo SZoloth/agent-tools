@@ -1,0 +1,19 @@
+{
+  "name": "mymind-local",
+  "version": "1.0.0",
+  "description": "Search your MyMind export from the CLI",
+  "type": "module",
+  "bin": {
+    "mymind": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "mcp": "node src/mcp.js"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "fuse.js": "^7.0.0",
+    "csv-parse": "^5.5.3",
+    "@modelcontextprotocol/sdk": "^0.5.0"
+  }
+}

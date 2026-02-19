@@ -1,0 +1,160 @@
+#!/bin/bash
+
+MEMORY_ROOT="$HOME/.claude/memory-v2"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+${BLUE}mem-defrag${NC} - Memory defragmentation and reorganization
+
+Usage: mem-defrag <agent> [options]
+
+Options:
+    --dry-run          Show what would be reorganized
+    --backup          Create backup before defrag
+    --target <n>      Target number of files (default: 15-25)
+
+Examples:
+    mem-defrag claude-code --dry-run
+    mem-defrag opencode --backup
+
+EOF
+    exit 1
+}
+
+analyze_memory() {
+    local agent="$1"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    local file_count=$(find "$agent_dir" -name "*.md" -type f 2>/dev/null | wc -l)
+    local total_lines=$(find "$agent_dir" -name "*.md" -type f -exec wc -l {} + 2>/dev/null | tail -1 | awk '{print $1}')
+    
+    echo "Files: $file_count"
+    echo "Lines: $total_lines"
+    
+    find "$agent_dir" -name "*.md" -type f -exec wc -l {} + 2>/dev/null | sort -n | tail -10
+}
+
+merge_similar_files() {
+    local agent="$1"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    echo -e "${YELLOW}Analyzing for merge candidates...${NC}"
+    
+    local insights_dir="$agent_dir/learn/insights"
+    if [ ! -d "$insights_dir" ]; then
+        echo -e "${GREEN}No insights directory to merge${NC}"
+        return
+    fi
+    
+    local insight_files=("$insights_dir"/*.md)
+    if [ ${#insight_files[@]} -lt 3 ]; then
+        echo -e "${GREEN}Not enough files to merge (need 3+)${NC}"
+        return
+    fi
+    
+    echo -e "${YELLOW}Would merge ${#insight_files[@]} insight files into consolidated summary${NC}"
+}
+
+create_consolidated() {
+    local agent="$1"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    local timestamp=$(date +%Y-%m-%d)
+    
+    local consolidated="$agent_dir/learn/consolidated_$timestamp.md"
+    
+    cat > "$consolidated" <<EOF
+---
+title: "Consolidated Memory"
+description: "Defragmented memory summary"
+priority: high
+tags: [consolidated, memory]
+lastUpdated: $timestamp
+---
+
+# Consolidated Memory
+
+This file contains the key insights from all past sessions.
+
+## Quick Reference
+- Profile: See system/01-profile.md
+- Preferences: See system/02-preferences.md
+- Projects: See learn/projects/
+
+## Key Patterns
+
+EOF
+    
+    echo -e "${GREEN}✓ Created consolidated memory${NC}"
+}
+
+run_defrag() {
+    local agent="$1"
+    local dry_run=false
+    local backup=false
+    local target=20
+    
+    shift
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            --backup)
+                backup=true
+                shift
+                ;;
+            --target)
+                target="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    if [ ! -d "$agent_dir" ]; then
+        echo -e "${RED}Agent $agent not found${NC}"
+        return 1
+    fi
+    
+    echo -e "${BLUE}Analyzing memory for $agent...${NC}"
+    analyze_memory "$agent"
+    
+    if [ "$dry_run" = true ]; then
+        echo -e "${YELLOW}Dry run - no changes made${NC}"
+        return
+    fi
+    
+    if [ "$backup" = true ]; then
+        local backup_dir="$MEMORY_ROOT/backups"
+        mkdir -p "$backup_dir"
+        cp -r "$agent_dir" "$backup_dir/${agent}_$(date +%Y%m%d)"
+        echo -e "${GREEN}✓ Backup created${NC}"
+    fi
+    
+    create_consolidated "$agent"
+    
+    cd "$MEMORY_ROOT" && git add "agents/$agent" && git commit -m "mem-defrag: reorganized $agent memory"
+    
+    echo -e "${GREEN}✓ mem-defrag complete for $agent${NC}"
+}
+
+case "$1" in
+    -h|--help)
+        usage
+        ;;
+    *)
+        if [ -z "$1" ]; then usage; fi
+        run_defrag "$@"
+        ;;
+esac

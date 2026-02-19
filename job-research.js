@@ -10,12 +10,15 @@
  * - Recent company content (blog, podcasts, news)
  *
  * Usage:
- *   job-research.js <company-name>                  # Research company
+ *   job-research.js <company-name>                  # Research company (premium tier)
  *   job-research.js <company-name> --hm "PM title"  # Include HM search for role
  *   job-research.js <company-name> --json           # Output JSON only
  *   job-research.js <company-name> --output <dir>   # Save to directory
+ *   job-research.js <company-name> --tier standard  # Brave Search only
+ *   job-research.js <company-name> --tier premium   # EXA + Brave (default)
+ *   job-research.js <company-name> --tier pinnacle  # EXA + deep content extraction
  *
- * Dependencies: Uses search.js from brave-search for web queries
+ * Dependencies: brave-search/search.js, exa-search.js
  */
 
 import { execFileSync } from "child_process";
@@ -23,6 +26,10 @@ import fs from "fs";
 import path from "path";
 
 const SEARCH_CMD = path.join(process.env.HOME, "agent-tools/brave-search/search.js");
+const EXA_CMD = path.join(process.env.HOME, "agent-tools/exa-search.js");
+
+// Check if EXA is available
+const EXA_AVAILABLE = !!process.env.EXA_API_KEY;
 
 // ============================================================================
 // SEARCH HELPERS
@@ -40,7 +47,124 @@ function runSearch(query, numResults = 5, fetchContent = false) {
     });
     return parseSearchResults(output);
   } catch (err) {
-    console.error(`Search failed for "${query}": ${err.message}`);
+    console.error(`Brave search failed for "${query}": ${err.message}`);
+    return [];
+  }
+}
+
+function runExaSearch(query, options = {}) {
+  if (!EXA_AVAILABLE) return [];
+
+  try {
+    const args = [query];
+    if (options.type) args.push("--type", options.type);
+    if (options.category) args.push("--category", options.category);
+    if (options.numResults) args.push(`-n${options.numResults}`);
+    args.push("--json");
+
+    const output = execFileSync(EXA_CMD, args, {
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const data = JSON.parse(output);
+    if (data.error) {
+      console.error(`EXA search error: ${data.error}`);
+      return [];
+    }
+    return (data.results || []).map((r) => ({
+      title: r.title || "No title",
+      url: r.url,
+      snippet: (r.text || "").slice(0, 300),
+      content: r.text || null,
+      source: "exa",
+    }));
+  } catch (err) {
+    console.error(`EXA search failed for "${query}": ${err.message}`);
+    return [];
+  }
+}
+
+function runExaTemplate(template, arg, numResults = 5) {
+  if (!EXA_AVAILABLE) return [];
+
+  try {
+    const args = ["--template", template, arg, `-n${numResults}`, "--json"];
+    const output = execFileSync(EXA_CMD, args, {
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const data = JSON.parse(output);
+    if (data.error) {
+      console.error(`EXA template error: ${data.error}`);
+      return [];
+    }
+    return (data.results || []).map((r) => ({
+      title: r.title || "No title",
+      url: r.url,
+      snippet: (r.text || "").slice(0, 300),
+      content: r.text || null,
+      source: "exa",
+    }));
+  } catch (err) {
+    console.error(`EXA template "${template}" failed: ${err.message}`);
+    return [];
+  }
+}
+
+function runExaFindSimilar(url, numResults = 5) {
+  if (!EXA_AVAILABLE) return [];
+
+  try {
+    const args = ["--similar", url, `-n${numResults}`, "--json"];
+    const output = execFileSync(EXA_CMD, args, {
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const data = JSON.parse(output);
+    if (data.error) {
+      console.error(`EXA findSimilar error: ${data.error}`);
+      return [];
+    }
+    return (data.results || []).map((r) => ({
+      title: r.title || "No title",
+      url: r.url,
+      snippet: (r.text || "").slice(0, 300),
+      content: r.text || null,
+      source: "exa",
+    }));
+  } catch (err) {
+    console.error(`EXA findSimilar failed for "${url}": ${err.message}`);
+    return [];
+  }
+}
+
+function runExaGetContents(urls) {
+  if (!EXA_AVAILABLE || urls.length === 0) return [];
+
+  try {
+    const args = ["--contents", ...urls, "--json"];
+    const output = execFileSync(EXA_CMD, args, {
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 10 * 1024 * 1024
+    });
+    const data = JSON.parse(output);
+    if (data.error) {
+      console.error(`EXA getContents error: ${data.error}`);
+      return [];
+    }
+    return (data.results || data.contents || []).map((r) => ({
+      title: r.title || "No title",
+      url: r.url,
+      snippet: (r.text || "").slice(0, 300),
+      content: r.text || null,
+      source: "exa",
+    }));
+  } catch (err) {
+    console.error(`EXA getContents failed: ${err.message}`);
     return [];
   }
 }
@@ -61,6 +185,7 @@ function parseSearchResults(output) {
         url: linkMatch[1].trim(),
         snippet: snippetMatch ? snippetMatch[1].trim() : "",
         content: contentMatch ? contentMatch[1].trim() : null,
+        source: "brave",
       });
     }
   }
@@ -68,11 +193,35 @@ function parseSearchResults(output) {
   return results;
 }
 
+/**
+ * Merge EXA results (higher quality) with Brave results, deduplicating by URL.
+ * EXA results appear first.
+ */
+function mergeResults(exaResults, braveResults) {
+  const seen = new Set();
+  const merged = [];
+
+  for (const r of exaResults) {
+    if (!seen.has(r.url)) {
+      seen.add(r.url);
+      merged.push(r);
+    }
+  }
+  for (const r of braveResults) {
+    if (!seen.has(r.url)) {
+      seen.add(r.url);
+      merged.push(r);
+    }
+  }
+
+  return merged;
+}
+
 // ============================================================================
 // RESEARCH FUNCTIONS
 // ============================================================================
 
-async function searchCompanyInfo(company) {
+async function searchCompanyInfo(company, tier) {
   console.error(`  Searching company profile...`);
 
   const results = {
@@ -86,7 +235,16 @@ async function searchCompanyInfo(company) {
   };
 
   // Search for company overview
-  const overviewResults = runSearch(`${company} company about funding employees`, 5);
+  let overviewResults = runSearch(`${company} company about funding employees`, 5);
+
+  // EXA supplement for premium/pinnacle
+  if (tier !== "standard") {
+    const exaOverview = runExaSearch(`${company} company overview funding employees`, {
+      type: "neural",
+      numResults: 5,
+    });
+    overviewResults = mergeResults(exaOverview, overviewResults);
+  }
 
   // Look for Crunchbase result for structured data
   const crunchbase = overviewResults.find((r) =>
@@ -94,14 +252,13 @@ async function searchCompanyInfo(company) {
   );
   if (crunchbase) {
     results.crunchbaseUrl = crunchbase.url;
-    // Extract info from snippet
     const fundingMatch = crunchbase.snippet.match(
       /(?:raised|funding)\s+\$?([\d.]+[MBK]?)/i
     );
     if (fundingMatch) results.funding.amount = fundingMatch[1];
 
     const employeeMatch = crunchbase.snippet.match(
-      /(\d+[-–]\d+|\d+\+?)\s*employees/i
+      /(\d+[-\u2013]\d+|\d+\+?)\s*employees/i
     );
     if (employeeMatch) results.size = employeeMatch[1] + " employees";
   }
@@ -151,7 +308,7 @@ async function searchCompanyInfo(company) {
   return results;
 }
 
-async function searchLeadership(company) {
+async function searchLeadership(company, tier) {
   console.error(`  Searching leadership...`);
 
   const leadership = {
@@ -168,7 +325,6 @@ async function searchLeadership(company) {
   const ceoResults = runSearch(`${company} CEO founder`, 5);
 
   for (const r of ceoResults) {
-    // Look for name patterns
     const namePatterns = [
       /CEO\s+(?:and\s+)?(?:Co-)?[Ff]ounder\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/,
       /([A-Z][a-z]+\s+[A-Z][a-z]+),?\s+(?:the\s+)?CEO/,
@@ -183,7 +339,6 @@ async function searchLeadership(company) {
       }
     }
 
-    // Check for LinkedIn
     if (r.url.includes("linkedin.com/in/") && !leadership.ceo.linkedin) {
       leadership.ceo.linkedin = r.url;
     }
@@ -211,6 +366,21 @@ async function searchLeadership(company) {
       if (r.snippet && r.snippet.length > 30) {
         leadership.ceo.recentPosts.push({
           platform: "web",
+          content: r.snippet.substring(0, 200),
+          url: r.url,
+        });
+      }
+    }
+  }
+
+  // EXA: search for HM's actual writing (premium/pinnacle)
+  if (tier !== "standard") {
+    console.error(`  [EXA] Searching HM thought leadership...`);
+    const hmContent = runExaTemplate("hm-content", company, 5);
+    for (const r of hmContent) {
+      if (r.snippet && r.snippet.length > 30) {
+        leadership.ceo.recentPosts.push({
+          platform: "exa",
           content: r.snippet.substring(0, 200),
           url: r.url,
         });
@@ -254,16 +424,13 @@ async function searchHiringManager(company, roleTitle) {
     return hmResults;
   }
 
-  // Derive likely HM titles from role
   const hmTitles = deriveHMTitles(roleTitle);
 
-  // Build LinkedIn search URL for manual follow-up
   const searchTerms = `${company} ${hmTitles[0]}`;
   hmResults.searchQuery = `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(
     searchTerms
   )}`;
 
-  // Search for each potential HM title
   for (const title of hmTitles.slice(0, 2)) {
     const results = runSearch(
       `${company} "${title}" site:linkedin.com`,
@@ -281,7 +448,6 @@ async function searchHiringManager(company, roleTitle) {
             confidence: title === hmTitles[0] ? "High - title match" : "Medium - org likely",
           };
 
-          // Avoid duplicates
           if (!hmResults.candidates.find((c) => c.linkedin === candidate.linkedin)) {
             hmResults.candidates.push(candidate);
           }
@@ -297,7 +463,6 @@ function deriveHMTitles(roleTitle) {
   const lower = roleTitle.toLowerCase();
   const titles = [];
 
-  // Product roles
   if (lower.includes("product manager") || lower.includes(" pm")) {
     if (lower.includes("senior") || lower.includes("sr")) {
       titles.push("Director of Product", "VP Product", "Head of Product");
@@ -306,21 +471,15 @@ function deriveHMTitles(roleTitle) {
     } else {
       titles.push("Senior Product Manager", "Director of Product", "Head of Product");
     }
-  }
-  // Engineering roles
-  else if (lower.includes("engineer") || lower.includes("developer")) {
+  } else if (lower.includes("engineer") || lower.includes("developer")) {
     if (lower.includes("senior") || lower.includes("staff")) {
       titles.push("Engineering Manager", "Director of Engineering");
     } else {
       titles.push("Engineering Manager", "Senior Engineering Manager");
     }
-  }
-  // Design roles
-  else if (lower.includes("design")) {
+  } else if (lower.includes("design")) {
     titles.push("Head of Design", "Director of Design", "Design Manager");
-  }
-  // Default
-  else {
+  } else {
     titles.push("Director", "VP", "Head of");
   }
 
@@ -341,7 +500,7 @@ function extractTitle(snippet) {
   return null;
 }
 
-async function searchCompanyContent(company) {
+async function searchCompanyContent(company, tier) {
   console.error(`  Searching company content...`);
 
   const content = {
@@ -350,7 +509,7 @@ async function searchCompanyContent(company) {
     pressReleases: [],
   };
 
-  // Search for blog posts
+  // Brave search for blog posts
   const blogResults = runSearch(`${company} blog engineering product 2024 2025`, 5);
   for (const r of blogResults) {
     if (
@@ -362,7 +521,59 @@ async function searchCompanyContent(company) {
         title: r.title,
         url: r.url,
         date: extractDate(r.snippet),
+        source: "brave",
       });
+    }
+  }
+
+  // EXA: engineering blog (premium/pinnacle)
+  if (tier !== "standard") {
+    console.error(`  [EXA] Searching engineering blog...`);
+    const exaBlog = runExaTemplate("engineering-blog", company, 5);
+    for (const r of exaBlog) {
+      if (!content.blogPosts.find((b) => b.url === r.url)) {
+        content.blogPosts.push({
+          title: r.title,
+          url: r.url,
+          date: extractDate(r.snippet),
+          source: "exa",
+        });
+      }
+    }
+  }
+
+  // EXA: product intelligence (premium/pinnacle)
+  if (tier !== "standard") {
+    console.error(`  [EXA] Searching product intelligence...`);
+    const exaProduct = runExaTemplate("product-intel", company, 5);
+    for (const r of exaProduct) {
+      if (!content.blogPosts.find((b) => b.url === r.url)) {
+        content.blogPosts.push({
+          title: r.title,
+          url: r.url,
+          date: extractDate(r.snippet),
+          source: "exa",
+        });
+      }
+    }
+  }
+
+  // EXA: industry analysis (premium/pinnacle)
+  if (tier !== "standard") {
+    console.error(`  [EXA] Searching industry analysis...`);
+    const exaIndustry = runExaSearch(`${company} industry analysis strategy`, {
+      category: "blog_post",
+      numResults: 5,
+    });
+    for (const r of exaIndustry) {
+      if (!content.blogPosts.find((b) => b.url === r.url)) {
+        content.blogPosts.push({
+          title: r.title,
+          url: r.url,
+          date: extractDate(r.snippet),
+          source: "exa",
+        });
+      }
     }
   }
 
@@ -414,7 +625,6 @@ async function searchRecentNews(company) {
   const newsResults = runSearch(`${company} news 2024 2025`, 5);
 
   for (const r of newsResults) {
-    // Filter to likely news sources
     const newsIndicators = [
       "techcrunch",
       "reuters",
@@ -442,6 +652,57 @@ async function searchRecentNews(company) {
   return news;
 }
 
+// Pinnacle-only: deep research with findSimilar and content extraction
+async function searchDeepIntelligence(company, companyWebsite) {
+  console.error(`  [EXA] Running deep intelligence (pinnacle)...`);
+
+  const deep = {
+    similarCompanies: [],
+    deepContent: [],
+    investorAnalysis: [],
+  };
+
+  // Find similar companies
+  if (companyWebsite) {
+    console.error(`  [EXA] Finding similar companies...`);
+    const similar = runExaFindSimilar(companyWebsite, 5);
+    deep.similarCompanies = similar.map((r) => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.snippet?.substring(0, 200) || "",
+    }));
+  }
+
+  // Investor/funding analysis
+  console.error(`  [EXA] Searching investor/funding intelligence...`);
+  const investorResults = runExaSearch(`${company} funding investor letter`, {
+    type: "neural",
+    numResults: 5,
+  });
+  deep.investorAnalysis = investorResults.map((r) => ({
+    title: r.title,
+    url: r.url,
+    snippet: r.snippet?.substring(0, 200) || "",
+  }));
+
+  return deep;
+}
+
+// Pinnacle-only: extract deep content from discovered URLs
+async function extractDeepContent(allResults) {
+  console.error(`  [EXA] Extracting deep content from top results...`);
+
+  // Pick top URLs that have interesting content
+  const urls = allResults
+    .filter((r) => r.url && !r.url.includes("linkedin.com"))
+    .slice(0, 5)
+    .map((r) => r.url);
+
+  if (urls.length === 0) return [];
+
+  return runExaGetContents(urls);
+}
+
 function extractDate(text) {
   if (!text) return null;
 
@@ -464,20 +725,49 @@ function extractDate(text) {
 // MAIN
 // ============================================================================
 
-async function runResearch(company, roleTitle = null) {
-  console.error(`\nResearching: ${company}`);
-  console.error("─".repeat(40));
+async function runResearch(company, roleTitle = null, tier = "premium") {
+  console.error(`\nResearching: ${company} (tier: ${tier})`);
+  console.error("\u2500".repeat(40));
+
+  if (tier !== "standard" && !EXA_AVAILABLE) {
+    console.error("  WARNING: EXA_API_KEY not set. Falling back to Brave-only (standard tier).");
+    tier = "standard";
+  }
 
   const research = {
-    company: await searchCompanyInfo(company),
-    leadership: await searchLeadership(company),
+    company: await searchCompanyInfo(company, tier),
+    leadership: await searchLeadership(company, tier),
     hiringManager: await searchHiringManager(company, roleTitle),
-    companyContent: await searchCompanyContent(company),
+    companyContent: await searchCompanyContent(company, tier),
     news: await searchRecentNews(company),
+    tier,
     researchedAt: new Date().toISOString(),
   };
 
-  console.error("─".repeat(40));
+  // Pinnacle: deep intelligence
+  if (tier === "pinnacle") {
+    research.deepIntelligence = await searchDeepIntelligence(
+      company,
+      research.company.website
+    );
+
+    // Collect all discovered URLs for deep content extraction
+    const allResults = [
+      ...research.companyContent.blogPosts,
+      ...research.companyContent.pressReleases,
+      ...research.news.map((n) => ({ url: n.url, title: n.headline })),
+    ];
+    const deepContent = await extractDeepContent(allResults);
+    if (deepContent.length > 0) {
+      research.deepIntelligence.deepContent = deepContent.map((r) => ({
+        title: r.title,
+        url: r.url,
+        content: r.content?.substring(0, 1000) || "",
+      }));
+    }
+  }
+
+  console.error("\u2500".repeat(40));
   console.error("Research complete.\n");
 
   return research;
@@ -487,6 +777,11 @@ function formatResearchMarkdown(research) {
   const { company, leadership, hiringManager, companyContent, news } = research;
 
   let md = "";
+
+  // Tier badge
+  if (research.tier && research.tier !== "standard") {
+    md += `> Research tier: **${research.tier}** (EXA semantic search enabled)\n\n`;
+  }
 
   // Company Profile
   md += `### Company Profile\n\n`;
@@ -512,8 +807,9 @@ function formatResearchMarkdown(research) {
 
     if (leadership.ceo.recentPosts.length > 0) {
       md += `**Recent Statements:**\n`;
-      for (const post of leadership.ceo.recentPosts.slice(0, 2)) {
-        md += `- "${post.content.substring(0, 150)}..." ([source](${post.url}))\n`;
+      for (const post of leadership.ceo.recentPosts.slice(0, 3)) {
+        const badge = post.platform === "exa" ? " [EXA]" : "";
+        md += `- "${post.content.substring(0, 150)}..."${badge} ([source](${post.url}))\n`;
       }
       md += `\n`;
     }
@@ -545,9 +841,10 @@ function formatResearchMarkdown(research) {
 
   if (companyContent.blogPosts.length > 0) {
     hasContent = true;
-    md += `**Blog Posts:**\n`;
-    for (const post of companyContent.blogPosts.slice(0, 3)) {
-      md += `- [${post.title}](${post.url})${post.date ? ` - ${post.date}` : ""}\n`;
+    md += `**Blog Posts & Analysis:**\n`;
+    for (const post of companyContent.blogPosts.slice(0, 5)) {
+      const badge = post.source === "exa" ? " [EXA]" : "";
+      md += `- [${post.title}](${post.url})${post.date ? ` - ${post.date}` : ""}${badge}\n`;
     }
     md += `\n`;
   }
@@ -575,6 +872,35 @@ function formatResearchMarkdown(research) {
     md += `*No recent news found*\n`;
   }
 
+  // Deep Intelligence (pinnacle only)
+  if (research.deepIntelligence) {
+    md += `\n### Deep Intelligence (Pinnacle)\n\n`;
+
+    if (research.deepIntelligence.similarCompanies.length > 0) {
+      md += `**Similar Companies:**\n`;
+      for (const c of research.deepIntelligence.similarCompanies.slice(0, 5)) {
+        md += `- [${c.title}](${c.url})\n`;
+      }
+      md += `\n`;
+    }
+
+    if (research.deepIntelligence.investorAnalysis.length > 0) {
+      md += `**Investor/Funding Intelligence:**\n`;
+      for (const r of research.deepIntelligence.investorAnalysis.slice(0, 3)) {
+        md += `- [${r.title}](${r.url}): ${r.snippet?.substring(0, 100) || ""}...\n`;
+      }
+      md += `\n`;
+    }
+
+    if (research.deepIntelligence.deepContent?.length > 0) {
+      md += `**Deep Content Extracts:**\n`;
+      for (const r of research.deepIntelligence.deepContent.slice(0, 3)) {
+        md += `- [${r.title}](${r.url}): ${r.content?.substring(0, 150) || ""}...\n`;
+      }
+      md += `\n`;
+    }
+  }
+
   return md;
 }
 
@@ -586,6 +912,7 @@ async function main() {
   let roleTitle = null;
   let outputDir = null;
   let jsonOnly = false;
+  let tier = "premium";
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -595,6 +922,12 @@ async function main() {
       outputDir = args[++i];
     } else if (arg === "--json") {
       jsonOnly = true;
+    } else if (arg === "--tier" && args[i + 1]) {
+      tier = args[++i];
+      if (!["standard", "premium", "pinnacle"].includes(tier)) {
+        console.error(`Invalid tier: ${tier}. Use standard, premium, or pinnacle.`);
+        process.exit(1);
+      }
     } else if (!arg.startsWith("-")) {
       company = arg;
     }
@@ -604,23 +937,29 @@ async function main() {
     console.log("Usage: job-research.js <company-name> [options]");
     console.log("");
     console.log("Options:");
-    console.log('  --hm "role title"   Search for hiring manager candidates');
-    console.log("  --json              Output JSON only (no markdown)");
-    console.log("  --output <dir>      Save research to directory");
+    console.log('  --hm "role title"           Search for hiring manager candidates');
+    console.log("  --json                      Output JSON only (no markdown)");
+    console.log("  --output <dir>              Save research to directory");
+    console.log("  --tier <standard|premium|pinnacle>");
+    console.log("                              Research depth (default: premium)");
+    console.log("");
+    console.log("Tiers:");
+    console.log("  standard   Brave Search only (fast, basic)");
+    console.log("  premium    EXA semantic + Brave fallback (default)");
+    console.log("  pinnacle   EXA + deep content extraction + similar companies");
     console.log("");
     console.log("Examples:");
     console.log('  job-research.js "Figma"');
     console.log('  job-research.js "Stripe" --hm "Senior Product Manager"');
-    console.log('  job-research.js "Uber" --json');
+    console.log('  job-research.js "Uber" --tier pinnacle --json');
     process.exit(1);
   }
 
-  const research = await runResearch(company, roleTitle);
+  const research = await runResearch(company, roleTitle, tier);
 
   if (jsonOnly) {
     console.log(JSON.stringify(research, null, 2));
   } else {
-    // Output both JSON and formatted markdown
     console.log("=== RESEARCH JSON ===");
     console.log(JSON.stringify(research, null, 2));
     console.log("\n=== RESEARCH MARKDOWN ===");

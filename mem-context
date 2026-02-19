@@ -1,0 +1,145 @@
+#!/usr/bin/env node
+
+import fs from 'fs';
+import path from 'path';
+import yaml from 'yaml';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const MEMORY_ROOT = process.env.MEMORY_ROOT || `${process.env.HOME}/.claude/memory-v2`;
+
+function parseFrontmatter(content) {
+    const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    if (!match) return null;
+    
+    try {
+        return {
+            frontmatter: yaml.parse(match[1]),
+            body: match[2]
+        };
+    } catch (e) {
+        return null;
+    }
+}
+
+function getFiles(dir, files = []) {
+    if (!fs.existsSync(dir)) return files;
+    
+    const items = fs.readdirSync(dir);
+    for (const item of items) {
+        const fullPath = path.join(dir, item);
+        const stat = fs.statSync(fullPath);
+        
+        if (stat.isDirectory() && !item.startsWith('.') && item !== 'archive') {
+            getFiles(fullPath, files);
+        } else if (stat.isFile() && item.endsWith('.md')) {
+            files.push(fullPath);
+        }
+    }
+    return files;
+}
+
+function scoreFile(filePath, query) {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const parsed = parseFrontmatter(content);
+    
+    if (!parsed) return { filePath, score: 0, frontmatter: null };
+    
+    const fm = parsed.frontmatter;
+    let score = 0;
+    
+    if (!fm) return { filePath, score: 0, frontmatter: null };
+    
+    if (fm.priority === 'high') score += 10;
+    else if (fm.priority === 'medium') score += 5;
+    
+    if (fm.tags && query.tags) {
+        const tagMatch = fm.tags.filter(t => query.tags.includes(t)).length;
+        score += tagMatch * 5;
+    }
+    
+    if (fm.title && query.title && fm.title.toLowerCase().includes(query.title.toLowerCase())) {
+        score += 3;
+    }
+    
+    return { filePath, score, frontmatter: fm, body: parsed.body };
+}
+
+function generateContext(agent, options = {}) {
+    const agentDir = path.join(MEMORY_ROOT, 'agents', agent);
+    const sharedDir = path.join(MEMORY_ROOT, 'shared');
+    
+    if (!fs.existsSync(agentDir)) {
+        console.error(`Agent ${agent} not found`);
+        process.exit(1);
+    }
+    
+    const systemDir = path.join(agentDir, 'system');
+    const learnDir = path.join(agentDir, 'learn');
+    const contextDir = path.join(agentDir, 'context');
+    
+    let files = [];
+    if (fs.existsSync(systemDir)) files = files.concat(getFiles(systemDir));
+    if (fs.existsSync(learnDir)) files = files.concat(getFiles(learnDir));
+    if (fs.existsSync(contextDir)) files = files.concat(getFiles(contextDir));
+    
+    // Always include shared content
+    if (fs.existsSync(sharedDir)) {
+        const sharedFiles = getFiles(sharedDir);
+        files = files.concat(sharedFiles);
+    }
+    
+    const scored = files.map(f => scoreFile(f, options)).sort((a, b) => b.score - a.score);
+    
+    let context = '';
+    
+    for (const file of scored) {
+        if (file.score === 0 && options.minScore) continue;
+        
+        const relativePath = path.relative(agentDir, file.filePath);
+        context += `\n## ${relativePath}\n`;
+        
+        if (file.frontmatter) {
+            context += `*Priority: ${file.frontmatter.priority || 'low'}*`;
+            if (file.frontmatter.tags) {
+                context += ` | *Tags: ${file.frontmatter.tags.join(', ')}*`;
+            }
+            context += '\n';
+        }
+        
+        context += '\n' + file.body + '\n';
+    }
+    
+    return context;
+}
+
+const args = process.argv.slice(2);
+if (args[0] === 'generate') {
+    const agent = args[1];
+    const tags = args.slice(2).filter(a => !a.startsWith('--'));
+    
+    console.log(generateContext(agent, { tags }));
+} else if (args[0] === 'extract') {
+    const file = args[1];
+    if (!file || !fs.existsSync(file)) {
+        console.error('File not found');
+        process.exit(1);
+    }
+    const content = fs.readFileSync(file, 'utf-8');
+    const parsed = parseFrontmatter(content);
+    console.log(JSON.stringify(parsed, null, 2));
+} else {
+    console.log(`
+mem-context - Progressive disclosure engine
+
+Usage:
+    mem-context generate <agent> [tags...]    Generate context for agent
+    mem-context extract <file>              Extract frontmatter from file
+
+Examples:
+    mem-context generate claude-code project architecture
+    mem-context extract ~/.claude/memory-v2/agents/claude-code/system/01-profile.md
+`);
+}

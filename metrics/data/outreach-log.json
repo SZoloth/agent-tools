@@ -1,5 +1,12 @@
 {
-  "outreaches": [],
+  "outreaches": [
+    {
+      "date": "2026-02-13",
+      "company": "Google",
+      "type": "voice_log",
+      "notes": "Logged via voice command"
+    }
+  ],
   "responses": [],
   "interviews": []
 }

@@ -1,0 +1,207 @@
+#!/bin/bash
+
+MEMORY_ROOT="$HOME/.claude/memory-v2"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+memrepo - Git-backed memory manager
+
+Usage: memrepo <command> [options]
+
+Commands:
+    init <agent>        Initialize agent memory directory
+    commit [agent]      Commit changes (all or specific agent)
+    log [agent]         Show commit history
+    diff [agent]        Show uncommitted changes
+    status              Show memory status
+    add <agent> <file>  Add file to agent memory
+    list                List all agents
+
+Examples:
+    memrepo init claude-code
+    memrepo commit claude-code "Added project context"
+    memrepo diff claude-code
+
+EOF
+    exit 1
+}
+
+init_agent() {
+    local agent="$1"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    if [ -d "$agent_dir/system" ]; then
+        echo -e "${YELLOW}Agent $agent already exists${NC}"
+        return 1
+    fi
+    
+    mkdir -p "$agent_dir"/{system,learn/{projects,patterns,relationships},context,archive}
+    
+    cat > "$agent_dir/system/01-profile.md" <<EOF
+---
+title: "Agent Profile"
+description: "Role, capabilities, and behavioral preferences"
+priority: high
+tags: [profile, agent]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# Agent Profile
+
+## Role
+Describe the agent's purpose and role here.
+
+## Capabilities
+- List of capabilities
+
+## Preferences
+User preferences and working style
+EOF
+
+    cat > "$agent_dir/system/02-preferences.md" <<EOF
+---
+title: "User Preferences"
+description: "User's working style and preferences"
+priority: high
+tags: [preferences, user]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# User Preferences
+
+## Communication Style
+- Preferred tone and style
+
+## Working Patterns
+- How the user likes to work
+
+## Key Context
+Important user context to remember
+EOF
+
+    cat > "$agent_dir/context/active.md" <<EOF
+---
+title: "Active Context"
+description: "Current session context"
+priority: high
+tags: [session, active]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# Active Context
+
+## Current Project
+Working on...
+
+## Recent Changes
+- Recent changes to remember
+
+## Open Questions
+- Things to investigate
+EOF
+
+    cd "$MEMORY_ROOT" && git add "agents/$agent" && git commit -m "Initialize $agent memory"
+    
+    echo -e "${GREEN}✓ Initialized $agent memory at $agent_dir${NC}"
+}
+
+commit_agent() {
+    local agent="$1"
+    local message="${2:-Update memory}"
+    
+    if [ -n "$agent" ]; then
+        local agent_dir="$MEMORY_ROOT/agents/$agent"
+        if [ ! -d "$agent_dir" ]; then
+            echo -e "${RED}Agent $agent does not exist${NC}"
+            return 1
+        fi
+        cd "$MEMORY_ROOT" && git add "agents/$agent" && git commit -m "$message"
+    else
+        cd "$MEMORY_ROOT" && git add -A && git commit -m "$message"
+    fi
+    
+    echo -e "${GREEN}✓ Committed changes${NC}"
+}
+
+show_log() {
+    local agent="$1"
+    
+    if [ -n "$agent" ]; then
+        cd "$MEMORY_ROOT" && git log --oneline "agents/$agent" | head -20
+    else
+        cd "$MEMORY_ROOT" && git log --oneline | head -20
+    fi
+}
+
+show_diff() {
+    local agent="$1"
+    
+    if [ -n "$agent" ]; then
+        cd "$MEMORY_ROOT" && git diff "agents/$agent"
+    else
+        cd "$MEMORY_ROOT" && git diff
+    fi
+}
+
+show_status() {
+    cd "$MEMORY_ROOT" && git status --short
+}
+
+list_agents() {
+    ls -1 "$MEMORY_ROOT/agents/" 2>/dev/null || echo "No agents initialized"
+}
+
+add_file() {
+    local agent="$1"
+    local file="$2"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    if [ ! -d "$agent_dir" ]; then
+        echo -e "${RED}Agent $agent does not exist${NC}"
+        return 1
+    fi
+    
+    if [ ! -f "$file" ]; then
+        echo -e "${RED}File $file does not exist${NC}"
+        return 1
+    fi
+    
+    cp "$file" "$agent_dir/context/"
+    cd "$MEMORY_ROOT" && git add "agents/$agent/context/$(basename $file)" && git commit -m "Add $file to $agent context"
+    
+    echo -e "${GREEN}✓ Added $file to $agent context${NC}"
+}
+
+case "$1" in
+    init)
+        [ -z "$2" ] && usage
+        init_agent "$2"
+        ;;
+    commit)
+        commit_agent "$2" "$3"
+        ;;
+    log)
+        show_log "$2"
+        ;;
+    diff)
+        show_diff "$2"
+        ;;
+    status)
+        show_status
+        ;;
+    add)
+        [ -z "$2" ] || [ -z "$3" ] && usage
+        add_file "$2" "$3"
+        ;;
+    list)
+        list_agents
+        ;;
+    *)
+        usage
+        ;;
+esac

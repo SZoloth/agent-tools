@@ -22,6 +22,7 @@
   },
   "homepage": "https://github.com/SZoloth/agent-tools#readme",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.75.0",
     "puppeteer-core": "^24.36.0"
   }
 }

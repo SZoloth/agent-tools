@@ -1,0 +1,144 @@
+#!/bin/bash
+
+MEMORY_ROOT="$HOME/.claude/memory-v2"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+${BLUE}mem-conflict${NC} - Resolve git conflicts in memory
+
+Usage: mem-conflict <command> [options]
+
+Commands:
+    list          List files with conflicts
+    ours <file>  Keep our version
+    theirs <file> Keep their version
+    both <file>  Keep both versions
+    resolve      Mark all conflicts resolved
+
+Examples:
+    mem-conflict list
+    mem-conflict ours agents/claude-code/context/active.md
+    mem-conflict resolve
+
+EOF
+    exit 1
+}
+
+list_conflicts() {
+    cd "$MEMORY_ROOT"
+    
+    local conflicts=$(git diff --name-only --diff-filter=U)
+    
+    if [ -z "$conflicts" ]; then
+        echo -e "${GREEN}No conflicts${NC}"
+        return
+    fi
+    
+    echo -e "${YELLOW}Files with conflicts:${NC}"
+    echo "$conflicts"
+    
+    echo ""
+    echo -e "${YELLOW}Conflict markers:${NC}"
+    for file in $conflicts; do
+        echo "--- $file ---"
+        grep -n "<<<<<<< HEAD" "$file" 2>/dev/null | head -3
+    done
+}
+
+keep_ours() {
+    local file="$1"
+    
+    if [ -z "$file" ]; then
+        echo -e "${RED}Specify file: mem-conflict ours <file>${NC}"
+        return 1
+    fi
+    
+    cd "$MEMORY_ROOT"
+    git checkout --ours "$file"
+    git add "$file"
+    
+    echo -e "${GREEN}✓ Kept our version of $file${NC}"
+}
+
+keep_theirs() {
+    local file="$1"
+    
+    if [ -z "$file" ]; then
+        echo -e "${RED}Specify file: mem-conflict theirs <file>${NC}"
+        return 1
+    fi
+    
+    cd "$MEMORY_ROOT"
+    git checkout --theirs "$file"
+    git add "$file"
+    
+    echo -e "${GREEN}✓ Kept their version of $file${NC}"
+}
+
+keep_both() {
+    local file="$1"
+    
+    if [ -z "$file" ]; then
+        echo -e "${RED}Specify file: mem-conflict both <file>${NC}"
+        return 1
+    fi
+    
+    cd "$MEMORY_ROOT"
+    
+    local temp_file="/tmp/conflict_$$"
+    sed -n '/<<<<<<</,/>>>>>>>/p' "$file" > "$temp_file"
+    
+    local ours_content=$(sed -n '/<<<<<<</,/=======/p' "$file" | sed '1d;$d')
+    local theirs_content=$(sed -n '/=======/,/>>>>>>>/p' "$file" | sed '1d;$d')
+    
+    sed -i '/<<<<<<</,/>>>>>>>/d' "$file"
+    
+    echo -e "\n## From our version\n$ours_content" >> "$file"
+    echo -e "\n## From their version\n$theirs_content" >> "$file"
+    
+    git add "$file"
+    
+    rm "$temp_file"
+    
+    echo -e "${GREEN}✓ Kept both versions in $file${NC}"
+}
+
+resolve_all() {
+    cd "$MEMORY_ROOT"
+    
+    local conflicts=$(git diff --name-only --diff-filter=U)
+    
+    if [ -z "$conflicts" ]; then
+        echo -e "${GREEN}No conflicts to resolve${NC}"
+        return
+    fi
+    
+    echo -e "${GREEN}✓ Marked all conflicts as resolved${NC}"
+}
+
+case "$1" in
+    list)
+        list_conflicts
+        ;;
+    ours)
+        keep_ours "$2"
+        ;;
+    theirs)
+        keep_theirs "$2"
+        ;;
+    both)
+        keep_both "$2"
+        ;;
+    resolve)
+        resolve_all
+        ;;
+    *)
+        usage
+        ;;
+esac

@@ -1,0 +1,137 @@
+#!/bin/bash
+
+MEMORY_ROOT="$HOME/.claude/memory-v2"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+${BLUE}mem-reflect${NC} - Sleep-time memory consolidation
+
+Usage: mem-reflect <agent> [options]
+
+Options:
+    --session <file>    Session transcript to reflect on
+    --days <n>          Reflect on last n days of history
+    --auto             Auto-generate from recent files
+
+Examples:
+    mem-reflect claude-code --session ~/session.md
+    mem-reflect opencode --days 7
+
+EOF
+    exit 1
+}
+
+extract_insights() {
+    local content="$1"
+    local insights=""
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ (important|key|critical|remember|note) ]]; then
+            insights+="$line\n"
+        fi
+    done <<< "$content"
+    
+    echo -e "$insights"
+}
+
+generate_reflection() {
+    local agent="$1"
+    local input_file="$2"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    local timestamp=$(date +%Y-%m-%d_%H%M%S)
+    
+    mkdir -p "$agent_dir/learn/insights"
+    
+    local content=""
+    if [ -n "$input_file" ] && [ -f "$input_file" ]; then
+        content=$(cat "$input_file")
+    else
+        content="Manual reflection session"
+    fi
+    
+    cat > "$agent_dir/learn/insights/reflection_$timestamp.md" <<EOF
+---
+title: "Reflection: $(date +%Y-%m-%d)"
+description: "Auto-generated reflection from session"
+priority: medium
+tags: [reflection, insight, $(date +%Y-%m)]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# Reflection: $(date +%Y-%m-%d)
+
+## Key Learnings
+
+### What worked well
+-
+
+### What could be improved
+-
+
+### Decisions made
+-
+
+### Things to remember
+
+## Action Items
+- [ ] 
+
+EOF
+    
+    echo -e "${GREEN}✓ Created reflection: reflection_$timestamp.md${NC}"
+    
+    cd "$MEMORY_ROOT" && git add "agents/$agent" && git commit -m "mem-reflect: $agent reflection $(date +%Y-%m-%d)"
+}
+
+run_reflect() {
+    local agent="$1"
+    local session_file=""
+    local days=""
+    
+    shift
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --session)
+                session_file="$2"
+                shift 2
+                ;;
+            --days)
+                days="$2"
+                shift 2
+                ;;
+            --auto)
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    if [ ! -d "$agent_dir" ]; then
+        echo -e "${RED}Agent $agent not found${NC}"
+        return 1
+    fi
+    
+    generate_reflection "$agent" "$session_file"
+    
+    echo -e "${GREEN}✓ mem-reflect complete for $agent${NC}"
+}
+
+case "$1" in
+    -h|--help)
+        usage
+        ;;
+    *)
+        if [ -z "$1" ]; then usage; fi
+        run_reflect "$@"
+        ;;
+esac

@@ -1,0 +1,206 @@
+#!/bin/bash
+
+MEMORY_ROOT="$HOME/.claude/memory-v2"
+SKILL_NAME="mem-init"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+usage() {
+    cat <<EOF
+${BLUE}mem-init${NC} - Bootstrap agent memory from codebase and history
+
+Usage: mem-init <agent> [options]
+
+Options:
+    --codebase <path>    Path to codebase to explore (default: current dir)
+    --history            Include conversation history
+    --dry-run            Show what would be created
+
+Examples:
+    mem-init claude-code --codebase ~/projects/myapp
+    mem-init opencode --dry-run
+
+EOF
+    exit 1
+}
+
+analyze_codebase() {
+    local agent="$1"
+    local codebase="$2"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    echo -e "${YELLOW}Analyzing codebase: $codebase${NC}"
+    
+    if [ ! -d "$codebase" ]; then
+        echo -e "${RED}Codebase not found: $codebase${NC}"
+        return 1
+    fi
+    
+    mkdir -p "$agent_dir/learn/projects"
+    
+    local project_name=$(basename "$codebase")
+    local readme_path="$codebase/README.md"
+    local package_json="$codebase/package.json"
+    local tsconfig="$codebase/tsconfig.json"
+    
+    cat > "$agent_dir/learn/projects/$project_name.md" <<EOF
+---
+title: "Project: $project_name"
+description: "Auto-generated project overview"
+priority: high
+tags: [project, $project_name, codebase]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# Project: $project_name
+
+## Overview
+$(if [ -f "$readme_path" ]; then head -20 "$readme_path" | tail -15; else echo "Codebase at: $codebase"; fi)
+
+## Tech Stack
+$(if [ -f "$package_json" ]; then 
+    echo "Dependencies:"
+    jq -r '.dependencies | to_entries | .[0:10] | .[] | "- \(.key): \(.value)"' "$package_json" 2>/dev/null || echo "  (see package.json)"
+fi)
+
+## Structure
+$(find "$codebase" -maxdepth 2 -type d 2>/dev/null | grep -v node_modules | grep -v .git | head -15 | sed "s|$codebase/||" | sort)
+
+## Key Files
+$(find "$codebase" -maxdepth 2 -name "*.ts" -o -name "*.js" -o -name "*.json" 2>/dev/null | grep -v node_modules | grep -v .git | head -10 | sed "s|$codebase/||" | sort)
+
+EOF
+    
+    echo -e "${GREEN}✓ Created project overview: $project_name.md${NC}"
+}
+
+analyze_dependencies() {
+    local agent="$1"
+    local codebase="$2"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    local package_json="$codebase/package.json"
+    
+    if [ ! -f "$package_json" ]; then
+        echo -e "${YELLOW}No package.json found, skipping dependencies${NC}"
+        return
+    fi
+    
+    local deps=$(jq -r '.dependencies // {} | keys[]' "$package_json" 2>/dev/null)
+    
+    cat > "$agent_dir/learn/projects/dependencies.md" <<EOF
+---
+title: "Dependencies"
+description: "Project dependencies overview"
+priority: medium
+tags: [dependencies, project]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# Dependencies
+
+## Runtime Dependencies
+$deps
+
+## Scripts
+$(jq -r '.scripts | to_entries | .[] | "- \(.key): \(.value)"' "$package_json" 2>/dev/null)
+
+EOF
+    
+    echo -e "${GREEN}✓ Created dependencies.md${NC}"
+}
+
+analyze_structure() {
+    local agent="$1"
+    local codebase="$2"
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    local structure=$(find "$codebase" -maxdepth 3 -type d 2>/dev/null | grep -v node_modules | grep -v .git | sed "s|$codebase/||" | sort | head -30)
+    
+    cat > "$agent_dir/learn/projects/structure.md" <<EOF
+---
+title: "Directory Structure"
+description: "Project directory tree"
+priority: medium
+tags: [structure, project]
+lastUpdated: $(date +%Y-%m-%d)
+---
+
+# Directory Structure
+
+\`\`\`
+$codebase/
+$structure
+\`\`\`
+
+EOF
+    
+    echo -e "${GREEN}✓ Created structure.md${NC}"
+}
+
+run_init() {
+    local agent="$1"
+    local codebase=""
+    local include_history=false
+    local dry_run=false
+    
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --codebase)
+                codebase="$2"
+                shift 2
+                ;;
+            --history)
+                include_history=true
+                shift
+                ;;
+            --dry-run)
+                dry_run=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    
+    local agent_dir="$MEMORY_ROOT/agents/$agent"
+    
+    if [ ! -d "$agent_dir" ]; then
+        echo -e "${RED}Agent $agent not initialized. Run: memrepo init $agent${NC}"
+        return 1
+    fi
+    
+    if [ -z "$codebase" ]; then
+        codebase=$(pwd)
+    fi
+    
+    if [ "$dry_run" = true ]; then
+        echo -e "${YELLOW}Dry run - would create:${NC}"
+        echo "  - learn/projects/$(basename $codebase).md"
+        echo "  - learn/projects/dependencies.md"
+        echo "  - learn/projects/structure.md"
+        return
+    fi
+    
+    analyze_codebase "$agent" "$codebase"
+    analyze_dependencies "$agent" "$codebase"
+    analyze_structure "$agent" "$codebase"
+    
+    cd "$MEMORY_ROOT" && git add "agents/$agent" && git commit -m "mem-init: Bootstrap $agent memory from $codebase"
+    
+    echo -e "${GREEN}✓ mem-init complete for $agent${NC}"
+}
+
+case "$1" in
+    -h|--help)
+        usage
+        ;;
+    *)
+        if [ -z "$1" ]; then usage; fi
+        run_init "$@"
+        ;;
+esac
