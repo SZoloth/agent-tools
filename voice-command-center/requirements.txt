@@ -1,2 +1,0 @@
-# Voice Command Center - Requirements
-# Run: pip install -r requirements.txt
