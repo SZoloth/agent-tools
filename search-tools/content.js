@@ -10,8 +10,15 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { localBrowserBlockMessage } from "../lib/browser-policy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const browserBlockMessage = localBrowserBlockMessage("Browser content extraction");
+if (browserBlockMessage) {
+	console.error(browserBlockMessage);
+	process.exit(1);
+}
 
 puppeteer.use(StealthPlugin());
 

@@ -2,6 +2,7 @@
 
 import { spawn, execSync } from "node:child_process";
 import puppeteer from "puppeteer-core";
+import { localBrowserBlockMessage } from "../lib/browser-policy.js";
 
 const useProfile = process.argv[2] === "--profile";
 
@@ -24,6 +25,12 @@ try {
 	console.log("✓ Chrome already running on :9222");
 	process.exit(0);
 } catch {}
+
+const browserBlockMessage = localBrowserBlockMessage("Browser startup");
+if (browserBlockMessage) {
+	console.error(browserBlockMessage);
+	process.exit(1);
+}
 
 // Setup profile directory
 execSync(`mkdir -p "${SCRAPING_DIR}"`, { stdio: "ignore" });
