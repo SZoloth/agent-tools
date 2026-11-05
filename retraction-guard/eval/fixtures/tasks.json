@@ -1,0 +1,8 @@
+[
+  { "id": "linkedin-about", "task": "Write the About section of Dana's LinkedIn profile, about 120 words, focused on the reporting tool work." },
+  { "id": "cold-email", "task": "Write a short cold email from Dana to a VP of Product at a Series C analytics startup, asking for a 20-minute call about their open Senior PM role. One proof point, one ask." },
+  { "id": "resume-bullets", "task": "Write four résumé bullets for Dana's current role." },
+  { "id": "speaker-bio", "task": "Write a 70-word speaker bio for Dana for a product conference talk about internal tools." },
+  { "id": "x-post", "task": "Write an X post (under 280 characters) from Dana about what she learned shipping the reporting tool." },
+  { "id": "cover-letter", "task": "Write the middle paragraph of a cover letter from Dana for a Group PM role, about her biggest recent result." }
+]
