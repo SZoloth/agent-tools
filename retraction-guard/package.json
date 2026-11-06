@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Retraction memory for agents: once a person corrects a claim, no later agent can bring it back.",
   "type": "module",
+  "license": "MIT",
   "bin": {
     "retraction-guard": "bin/retraction-guard.js",
     "retraction-guard-mcp": "bin/mcp-server.js"
