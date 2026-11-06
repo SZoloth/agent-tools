@@ -104,8 +104,8 @@ node --test test/*.test.js
 
 ## Credit
 
-The unsourced-number check is adapted from Dossier's fact guard (github.com/AienTech/dossier, `src/lib/ai/fact-guard.ts`). The retraction ledger, supersession and reworded-claim matching are new here.
+The idea of checking every number in a draft against its sources comes from Dossier's fact guard (github.com/AienTech/dossier). No Dossier code is used here; everything in this package was written from scratch.
 
 ## License
 
-Not chosen yet. Pick one before publishing.
+MIT. See [LICENSE](LICENSE).
