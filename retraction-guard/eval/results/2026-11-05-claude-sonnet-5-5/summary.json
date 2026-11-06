@@ -1,0 +1,55 @@
+{
+  "rows": [
+    {
+      "condition": "stale",
+      "n": 18,
+      "draftsWithRetracted": 17,
+      "claimInstances": 33,
+      "nameLeaks": 16,
+      "draftsAnyProblem": 17,
+      "firstDraftsAnyProblem": 17,
+      "revisedDrafts": 0
+    },
+    {
+      "condition": "stale+guard",
+      "n": 18,
+      "draftsWithRetracted": 1,
+      "claimInstances": 1,
+      "nameLeaks": 0,
+      "draftsAnyProblem": 1,
+      "firstDraftsAnyProblem": 17,
+      "revisedDrafts": 17
+    },
+    {
+      "condition": "memory",
+      "n": 18,
+      "draftsWithRetracted": 0,
+      "claimInstances": 0,
+      "nameLeaks": 0,
+      "draftsAnyProblem": 0,
+      "firstDraftsAnyProblem": 0,
+      "revisedDrafts": 0
+    },
+    {
+      "condition": "memory+guard",
+      "n": 18,
+      "draftsWithRetracted": 0,
+      "claimInstances": 0,
+      "nameLeaks": 0,
+      "draftsAnyProblem": 0,
+      "firstDraftsAnyProblem": 0,
+      "revisedDrafts": 0
+    }
+  ],
+  "guard": {
+    "rounds": 53,
+    "falseBlocks": 0,
+    "missed": 1
+  },
+  "byClaim": {
+    "analysts-1000": 15,
+    "build-time": 15,
+    "vendor-paused": 3
+  },
+  "errors": 0
+}

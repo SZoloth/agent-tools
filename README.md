@@ -26,3 +26,6 @@ Interactive browser automation (requires visible Chrome window). See [browser-to
 
 ## vscode
 VS Code integration tools. See [vscode/README.md](vscode/README.md).
+
+## retraction-guard
+Retraction memory for agents: once a person corrects a claim, no later agent can bring it back. CLI, MCP server and Agent Skill, plus a stale-notes eval. See [retraction-guard/README.md](retraction-guard/README.md).

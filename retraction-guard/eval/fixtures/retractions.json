@@ -1,0 +1,165 @@
+{
+  "version": 1,
+  "retractions": [
+    {
+      "id": "launched-to-1-000-analysts",
+      "claim": "launched to 1,000+ analysts",
+      "match": {
+        "numbers": [
+          {
+            "value": 1000,
+            "kind": "count"
+          }
+        ],
+        "terms": [
+          "launch",
+          "analyst"
+        ]
+      },
+      "reason": "1,000 is total headcount; usage was never counted",
+      "source": "Dana, corrections note, 2026-10-21",
+      "retractedBy": "human",
+      "retractedAt": "2026-11-05",
+      "replacement": "launched to analysts across the company"
+    },
+    {
+      "id": "report-build-time-dropped-from-2-days-to-20-minu",
+      "claim": "report build time dropped from 2 days to 20 minutes",
+      "match": {
+        "numbers": [
+          {
+            "value": 2,
+            "kind": "count"
+          },
+          {
+            "value": 20,
+            "kind": "count"
+          }
+        ],
+        "terms": [
+          "report",
+          "build",
+          "time",
+          "dropp"
+        ]
+      },
+      "reason": "one team's anecdote, never measured",
+      "source": "Dana, corrections note, 2026-10-21",
+      "retractedBy": "human",
+      "retractedAt": "2026-11-05",
+      "replacement": "report builds got much faster (not measured)"
+    },
+    {
+      "id": "weekly-actives-grew-3x",
+      "claim": "weekly actives grew 3x",
+      "match": {
+        "numbers": [
+          {
+            "value": 3,
+            "kind": "multiplier"
+          }
+        ],
+        "terms": [
+          "weekly",
+          "active",
+          "usage",
+          "adoption",
+          "user",
+          "analyst"
+        ]
+      },
+      "reason": "a one-week spike",
+      "source": "Dana, corrections note, 2026-10-21",
+      "retractedBy": "human",
+      "retractedAt": "2026-11-05",
+      "replacement": "+45% weekly active analysts, April to September"
+    },
+    {
+      "id": "saved-250k-a-year",
+      "claim": "saved $250K a year",
+      "match": {
+        "numbers": [
+          {
+            "value": 250000,
+            "kind": "money"
+          }
+        ],
+        "terms": []
+      },
+      "reason": "assumes an hourly rate nobody can source",
+      "source": "Dana, corrections note, 2026-10-21",
+      "retractedBy": "human",
+      "retractedAt": "2026-11-05",
+      "replacement": "estimated to save about 900 analyst hours a year"
+    },
+    {
+      "id": "led-a-team-of-12-engineers",
+      "claim": "led a team of 12 engineers",
+      "match": {
+        "numbers": [
+          {
+            "value": 12,
+            "kind": "count"
+          }
+        ],
+        "terms": [
+          "engineer",
+          "developer",
+          "team",
+          "people",
+          "report"
+        ]
+      },
+      "reason": "worked with 4 engineers and managed none",
+      "source": "Dana, corrections note, 2026-10-21",
+      "retractedBy": "human",
+      "retractedAt": "2026-11-05",
+      "replacement": "worked with a team of 4 engineers"
+    },
+    {
+      "id": "paused-the-vendor-contracts",
+      "claim": "paused the vendor contracts",
+      "match": {
+        "numbers": [],
+        "terms": [
+          "paus",
+          "vendor"
+        ]
+      },
+      "reason": "evaluated two vendors, found eval-suite gaps, expanded the eval suite before buying",
+      "source": "Dana, corrections note, 2026-10-21",
+      "retractedBy": "human",
+      "retractedAt": "2026-11-05",
+      "replacement": "evaluated two vendors, found gaps in our eval suite, and expanded it before buying"
+    }
+  ],
+  "approved": [
+    {
+      "id": "wau-45",
+      "claim": "+45% weekly active analysts, April to September",
+      "source": "notes/2026-09-15-dashboard-pull.md"
+    },
+    {
+      "id": "hours-900",
+      "claim": "estimated to save about 900 analyst hours a year",
+      "source": "notes/2026-09-15-dashboard-pull.md"
+    },
+    {
+      "id": "no-ticket-58",
+      "claim": "58% of recurring reports built without a data-team ticket in September",
+      "source": "notes/2026-09-15-dashboard-pull.md"
+    },
+    {
+      "id": "team-4",
+      "claim": "worked with a team of 4 engineers",
+      "source": "notes/2026-10-21-corrections.md"
+    }
+  ],
+  "superseded": [],
+  "confidential": {
+    "names": [
+      "Bluebird"
+    ],
+    "fix": "Say \"an internal reporting tool\"."
+  }
+}

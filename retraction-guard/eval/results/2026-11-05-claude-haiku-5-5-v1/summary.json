@@ -1,0 +1,58 @@
+{
+  "rows": [
+    {
+      "condition": "stale",
+      "n": 18,
+      "draftsWithRetracted": 18,
+      "claimInstances": 48,
+      "nameLeaks": 18,
+      "draftsAnyProblem": 18,
+      "firstDraftsAnyProblem": 18,
+      "revisedDrafts": 0
+    },
+    {
+      "condition": "stale+guard",
+      "n": 18,
+      "draftsWithRetracted": 3,
+      "claimInstances": 5,
+      "nameLeaks": 2,
+      "draftsAnyProblem": 3,
+      "firstDraftsAnyProblem": 18,
+      "revisedDrafts": 18
+    },
+    {
+      "condition": "memory",
+      "n": 18,
+      "draftsWithRetracted": 0,
+      "claimInstances": 0,
+      "nameLeaks": 0,
+      "draftsAnyProblem": 0,
+      "firstDraftsAnyProblem": 0,
+      "revisedDrafts": 0
+    },
+    {
+      "condition": "memory+guard",
+      "n": 18,
+      "draftsWithRetracted": 0,
+      "claimInstances": 0,
+      "nameLeaks": 0,
+      "draftsAnyProblem": 0,
+      "firstDraftsAnyProblem": 0,
+      "revisedDrafts": 2
+    }
+  ],
+  "guard": {
+    "rounds": 56,
+    "falseBlocks": 5,
+    "missed": 0
+  },
+  "byClaim": {
+    "analysts-1000": 17,
+    "build-time": 17,
+    "savings-250k": 7,
+    "vendor-paused": 5,
+    "wau-3x": 1,
+    "team-12": 1
+  },
+  "errors": 0
+}
